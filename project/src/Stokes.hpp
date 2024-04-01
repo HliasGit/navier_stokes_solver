@@ -39,7 +39,7 @@ class Stokes
 {
 public:
   // Physical dimension (1D, 2D, 3D)
-  static constexpr unsigned int dim = 3;
+  static constexpr unsigned int dim = 2;
 
   // Function for the forcing term.
   class ForcingTerm : public Function<dim>
@@ -49,24 +49,17 @@ public:
     vector_value(const Point<dim> & /*p*/,
                  Vector<double> &values) const override
     {
-      for (unsigned int i = 0; i < dim - 1; ++i)
+      for (unsigned int i = 0; i < dim; ++i)
         values[i] = 0.0;
 
-      values[dim - 1] = -g;
     }
 
     virtual double
     value(const Point<dim> & /*p*/,
           const unsigned int component = 0) const override
     {
-      if (component == dim - 1)
-        return -g;
-      else
         return 0.0;
     }
-
-  protected:
-    const double g = 0.0;
   };
 
   // Function for inlet velocity. This actually returns an object with four
@@ -85,24 +78,41 @@ public:
     virtual void
     vector_value(const Point<dim> &p, Vector<double> &values) const override
     {
-      values[0] = -alpha * p[1] * (2.0 - p[1]) * (1.0 - p[2]) * (2.0 - p[2]);
-
-      for (unsigned int i = 1; i < dim + 1; ++i)
-        values[i] = 0.0;
+      for (unsigned int i = 0; i < dim + 1; ++i)
+        values[i] = 10.0;
     }
 
     virtual double
     value(const Point<dim> &p, const unsigned int component = 0) const override
     {
-      if (component == 0)
-        return -alpha * p[1] * (2.0 - p[1]) * (1.0 - p[2]) * (2.0 - p[2]);
-      else
-        return 0.0;
+      return 10.0;
+    }
+  };
+
+  // Dirichlet boundary conditions
+  class FunctionG : public Function<dim>
+  {
+  public:
+    // Constructor.
+    FunctionG()
+    {}
+
+    virtual void
+    vector_value(const Point<dim> & /*p*/,
+                 Vector<double> &values) const override
+    {
+      for (unsigned int i = 0; i < dim; ++i)
+        values[i] = 0.0;
     }
 
-  protected:
-    const double alpha = 1.0;
+    virtual double
+    value(const Point<dim> & /*p*/,
+          const unsigned int /*component*/ = 0) const override
+    {
+      return 0.0;
+    }
   };
+
 
   // Since we're working with block matrices, we need to make our own
   // preconditioner class. A preconditioner class can be any class that exposes
@@ -291,13 +301,15 @@ protected:
   // Problem definition. ///////////////////////////////////////////////////////
 
   // Kinematic viscosity [m2/s].
-  const double nu = 1;
+  const double nu = 1.0;
 
   // Outlet pressure [Pa].
-  const double p_out = 10;
+  const double p_out = 0.0;
 
   // Forcing term.
   ForcingTerm forcing_term;
+
+  FunctionG functionG;
 
   // Inlet velocity.
   InletVelocity inlet_velocity;

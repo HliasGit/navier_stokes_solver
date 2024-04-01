@@ -211,6 +211,13 @@ Stokes::assemble()
             {
               for (unsigned int j = 0; j < dofs_per_cell; ++j)
                 {
+                  
+                 /* cell_matrix(i, j) +=
+                    scalar_product(fe_values[velocity].value(i, q),
+                                   fe_values[velocity].gradient(i, q)) * 
+                    fe_values[velocity].value(j, q) *
+                    fe_values.JxW(q);*/
+
                   // Viscosity term.
                   cell_matrix(i, j) +=
                     nu *
@@ -242,12 +249,13 @@ Stokes::assemble()
         }
 
       // Boundary integral for Neumann BCs.
+      
       if (cell->at_boundary())
         {
           for (unsigned int f = 0; f < cell->n_faces(); ++f)
             {
               if (cell->face(f)->at_boundary() &&
-                  cell->face(f)->boundary_id() == 2)
+                  cell->face(f)->boundary_id() == 28)
                 {
                   fe_face_values.reinit(cell, f);
 
@@ -266,7 +274,7 @@ Stokes::assemble()
                 }
             }
         }
-
+  
       cell->get_dof_indices(dof_indices);
 
       system_matrix.add(dof_indices, cell_matrix);
@@ -286,21 +294,37 @@ Stokes::assemble()
     // We interpolate first the inlet velocity condition alone, then the wall
     // condition alone, so that the latter "win" over the former where the two
     // boundaries touch.
+    /*
     boundary_functions[0] = &inlet_velocity;
     VectorTools::interpolate_boundary_values(dof_handler,
                                              boundary_functions,
                                              boundary_values,
                                              ComponentMask(
-                                               {true, true, true, false}));
+                                               {true, true, false}));
 
     boundary_functions.clear();
     Functions::ZeroFunction<dim> zero_function(dim + 1);
-    boundary_functions[1] = &zero_function;
+    boundary_functions[2] = &zero_function;
+    boundary_functions[3] = &zero_function;*/
+
+    std::cout << "Boundary Functions" << std::endl;
+    for (auto const& element : boundary_functions) {
+      std::cout << "  " << element.first << std::endl;
+    }
+
+    // 6 borders
+    // 7 inlet
+    // 8 outlet
+    boundary_functions[26] = &functionG;
+    boundary_functions[27] = &inlet_velocity;
+    //boundary_functions[8] = &functionG;
+
+
     VectorTools::interpolate_boundary_values(dof_handler,
                                              boundary_functions,
                                              boundary_values,
                                              ComponentMask(
-                                               {true, true, true, false}));
+                                               {true, true, false}));
 
     MatrixTools::apply_boundary_values(
       boundary_values, system_matrix, solution, system_rhs, false);
@@ -312,7 +336,7 @@ Stokes::solve()
 {
   pcout << "===============================================" << std::endl;
 
-  SolverControl solver_control(2000, 1e-6 * system_rhs.l2_norm());
+  SolverControl solver_control(5000, 1e-6 * system_rhs.l2_norm());
 
   SolverGMRES<TrilinosWrappers::MPI::BlockVector> solver(solver_control);
 
@@ -346,7 +370,6 @@ Stokes::output()
   data_component_interpretation.push_back(
     DataComponentInterpretation::component_is_scalar);
   std::vector<std::string> names = {"velocity",
-                                    "velocity",
                                     "velocity",
                                     "pressure"};
 
