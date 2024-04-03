@@ -1,0 +1,3 @@
+/home/elia/source/navier_stokes_solver/lab-09/build/CMakeFiles/edit_cache.dir
+/home/elia/source/navier_stokes_solver/lab-09/build/CMakeFiles/rebuild_cache.dir
+/home/elia/source/navier_stokes_solver/lab-09/build/CMakeFiles/lab-09.dir

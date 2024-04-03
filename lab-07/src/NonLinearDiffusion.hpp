@@ -7,14 +7,20 @@
 #include <deal.II/distributed/fully_distributed_tria.h>
 
 #include <deal.II/dofs/dof_handler.h>
+#include <deal.II/dofs/dof_renumbering.h>
 #include <deal.II/dofs/dof_tools.h>
 
 #include <deal.II/fe/fe_simplex_p.h>
+#include <deal.II/fe/fe_system.h>
 #include <deal.II/fe/fe_values.h>
+#include <deal.II/fe/fe_values_extractors.h>
+#include <deal.II/fe/mapping_fe.h>
 
 #include <deal.II/grid/grid_in.h>
 
 #include <deal.II/lac/solver_gmres.h>
+#include <deal.II/lac/trilinos_block_sparse_matrix.h>
+#include <deal.II/lac/trilinos_parallel_block_vector.h>
 #include <deal.II/lac/trilinos_precondition.h>
 #include <deal.II/lac/trilinos_sparse_matrix.h>
 
@@ -32,7 +38,7 @@ class NonLinearDiffusion
 {
 public:
   // Physical dimension (1D, 2D, 3D)
-  static constexpr unsigned int dim = 3;
+  static constexpr unsigned int dim = 2;
 
   // Function for the mu_0 coefficient.
   class FunctionMu0 : public Function<dim>
@@ -71,12 +77,15 @@ public:
   };
 
   // Constructor.
-  NonLinearDiffusion(const std::string &mesh_file_name_, const unsigned int &r_)
+  NonLinearDiffusion(const std::string &mesh_file_name_,
+                     const unsigned int &degree_velocity_,
+                     const unsigned int &degree_pressure_)
     : mpi_size(Utilities::MPI::n_mpi_processes(MPI_COMM_WORLD))
     , mpi_rank(Utilities::MPI::this_mpi_process(MPI_COMM_WORLD))
     , pcout(std::cout, mpi_rank == 0)
     , mesh_file_name(mesh_file_name_)
-    , r(r_)
+    , degree_velocity(degree_velocity_)
+    , degree_pressure(degree_pressure_)
     , mesh(MPI_COMM_WORLD)
   {}
 
@@ -126,10 +135,13 @@ protected:
   // Discretization. ///////////////////////////////////////////////////////////
 
   // Mesh file name.
-  const std::string &mesh_file_name;
+  const std::string mesh_file_name;
 
-  // Polynomial degree.
-  const unsigned int r;
+  // Polynomial degree used for velocity.
+  const unsigned int degree_velocity;
+
+  // Polynomial degree used for pressure.
+  const unsigned int degree_pressure;
 
   // Mesh.
   parallel::fullydistributed::Triangulation<dim> mesh;
@@ -140,6 +152,9 @@ protected:
   // Quadrature formula.
   std::unique_ptr<Quadrature<dim>> quadrature;
 
+  // Quadrature formula for face integrals.
+  std::unique_ptr<Quadrature<dim - 1>> quadrature_face;
+
   // DoF handler.
   DoFHandler<dim> dof_handler;
 
@@ -148,6 +163,12 @@ protected:
 
   // DoFs relevant to the current process (including ghost DoFs).
   IndexSet locally_relevant_dofs;
+
+  // DoFs owned by current process in the velocity and pressure blocks.
+  std::vector<IndexSet> block_owned_dofs;
+
+  // DoFs relevant to current process in the velocity and pressure blocks.
+  std::vector<IndexSet> block_relevant_dofs;
 
   // Jacobian matrix.
   TrilinosWrappers::SparseMatrix jacobian_matrix;
