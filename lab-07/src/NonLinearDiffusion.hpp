@@ -18,6 +18,7 @@
 
 #include <deal.II/grid/grid_in.h>
 
+#include <deal.II/lac/solver_cg.h>
 #include <deal.II/lac/solver_gmres.h>
 #include <deal.II/lac/trilinos_block_sparse_matrix.h>
 #include <deal.II/lac/trilinos_parallel_block_vector.h>
@@ -40,27 +41,15 @@ public:
   // Physical dimension (1D, 2D, 3D)
   static constexpr unsigned int dim = 2;
 
-  // Function for the mu_0 coefficient.
-  class FunctionMu0 : public Function<dim>
+  // Function for the nu coefficient.
+  class FunctionNu : public Function<dim>
   {
   public:
     virtual double
     value(const Point<dim> & /*p*/,
           const unsigned int /*component*/ = 0) const override
     {
-      return 1.0;
-    }
-  };
-
-  // Function for the mu_1 coefficient.
-  class FunctionMu1 : public Function<dim>
-  {
-  public:
-    virtual double
-    value(const Point<dim> & /*p*/,
-          const unsigned int /*component*/ = 0) const override
-    {
-      return 10.0;
+      return 0.1;
     }
   };
 
@@ -72,8 +61,118 @@ public:
     value(const Point<dim> & /*p*/,
           const unsigned int /*component*/ = 0) const override
     {
+      return 0.0;
+    }
+  };
+
+  // Function for inlet velocity. This actually returns an object with four
+  // components (one for each velocity component, and one for the pressure), but
+  // then only the first three are really used (see the component mask when
+  // applying boundary conditions at the end of assembly). If we only return
+  // three components, however, we may get an error message due to this function
+  // being incompatible with the finite element space.
+  class InletVelocity : public Function<dim>
+  {
+  public:
+    InletVelocity()
+      : Function<dim>(dim + 1)
+    {}
+
+    virtual void
+    vector_value(const Point<dim> &p, Vector<double> &values) const override
+    {
+      for (unsigned int i = 0; i < dim + 1; ++i)
+        values[i] = 1.0;
+    }
+
+    virtual double
+    value(const Point<dim> &p, const unsigned int component = 0) const override
+    {
       return 1.0;
     }
+  };
+
+  // Identity preconditioner.
+  class PreconditionIdentity
+  {
+  public:
+    // Application of the preconditioner: we just copy the input vector (src)
+    // into the output vector (dst).
+    void
+    vmult(TrilinosWrappers::MPI::BlockVector       &dst,
+          const TrilinosWrappers::MPI::BlockVector &src) const
+    {
+      dst = src;
+    }
+
+  protected:
+  };
+
+  // Block-triangular preconditioner.
+  class PreconditionBlockTriangular
+  {
+  public:
+    // Initialize the preconditioner, given the velocity stiffness matrix, the
+    // pressure mass matrix.
+    void
+    initialize(const TrilinosWrappers::SparseMatrix &velocity_stiffness_,
+               const TrilinosWrappers::SparseMatrix &pressure_mass_,
+               const TrilinosWrappers::SparseMatrix &B_)
+    {
+      velocity_stiffness = &velocity_stiffness_;
+      pressure_mass      = &pressure_mass_;
+      B                  = &B_;
+
+      preconditioner_velocity.initialize(velocity_stiffness_);
+      preconditioner_pressure.initialize(pressure_mass_);
+    }
+
+    // Application of the preconditioner.
+    void
+    vmult(TrilinosWrappers::MPI::BlockVector       &dst,
+          const TrilinosWrappers::MPI::BlockVector &src) const
+    {
+      SolverControl                           solver_control_velocity(100000,
+                                            1e-2 * src.block(0).l2_norm());
+      SolverCG<TrilinosWrappers::MPI::Vector> solver_cg_velocity(
+        solver_control_velocity);
+      solver_cg_velocity.solve(*velocity_stiffness,
+                               dst.block(0),
+                               src.block(0),
+                               preconditioner_velocity);
+
+      tmp.reinit(src.block(1));
+      B->vmult(tmp, dst.block(0));
+      tmp.sadd(-1.0, src.block(1));
+
+      SolverControl                           solver_control_pressure(100000,
+                                            1e-2 * src.block(1).l2_norm());
+      SolverCG<TrilinosWrappers::MPI::Vector> solver_cg_pressure(
+        solver_control_pressure);
+      solver_cg_pressure.solve(*pressure_mass,
+                               dst.block(1),
+                               tmp,
+                               preconditioner_pressure);
+    }
+
+  protected:
+    // Velocity stiffness matrix.
+    const TrilinosWrappers::SparseMatrix *velocity_stiffness;
+
+    // Preconditioner used for the velocity block.
+    TrilinosWrappers::PreconditionILU preconditioner_velocity;
+
+    // Pressure mass matrix.
+    const TrilinosWrappers::SparseMatrix *pressure_mass;
+
+    // Preconditioner used for the pressure block.
+    TrilinosWrappers::PreconditionILU preconditioner_pressure;
+
+    // B matrix.
+    const TrilinosWrappers::SparseMatrix *B;
+
+    // Temporary vector.
+    mutable TrilinosWrappers::MPI::Vector tmp;
   };
 
   // Constructor.
@@ -123,14 +222,17 @@ protected:
 
   // Problem definition. ///////////////////////////////////////////////////////
 
-  // mu_0 coefficient.
-  FunctionMu0 mu_0;
-
-  // mu_1 coefficient.
-  FunctionMu1 mu_1;
+  // nu coefficient.
+  FunctionNu nu;
 
   // Forcing term.
   ForcingTerm forcing_term;
+
+  // Inlet velocity
+  InletVelocity inlet_velocity;
+
+  // Outlet pressure [Pa].
+  const double p_out = 10.0;
 
   // Discretization. ///////////////////////////////////////////////////////////
 
@@ -170,20 +272,24 @@ protected:
   // DoFs relevant to current process in the velocity and pressure blocks.
   std::vector<IndexSet> block_relevant_dofs;
 
-  // Jacobian matrix.
-  TrilinosWrappers::SparseMatrix jacobian_matrix;
+  // System matrix.
+  TrilinosWrappers::BlockSparseMatrix system_matrix;
+
+  // Pressure mass matrix, needed for preconditioning. We use a block matrix for
+  // convenience, but in practice we only look at the pressure-pressure block.
+  TrilinosWrappers::BlockSparseMatrix pressure_mass;
 
   // Residual vector.
-  TrilinosWrappers::MPI::Vector residual_vector;
+  TrilinosWrappers::MPI::BlockVector residual_vector;
 
   // Solution increment (without ghost elements).
-  TrilinosWrappers::MPI::Vector delta_owned;
+  TrilinosWrappers::MPI::BlockVector delta_owned;
 
   // System solution (without ghost elements).
-  TrilinosWrappers::MPI::Vector solution_owned;
+  TrilinosWrappers::MPI::BlockVector solution_owned;
 
   // System solution (including ghost elements).
-  TrilinosWrappers::MPI::Vector solution;
+  TrilinosWrappers::MPI::BlockVector solution;
 };
 
 #endif

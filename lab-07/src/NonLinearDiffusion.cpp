@@ -157,15 +157,16 @@ NonLinearDiffusion::setup()
     // Then, we use the sparsity pattern to initialize the system matrix. Since
     // the sparsity pattern is partitioned by row, so will the matrix.
     pcout << "  Initializing the system matrix" << std::endl;
-    jacobian_matrix.reinit(sparsity);
+    system_matrix.reinit(sparsity);
+    pressure_mass.reinit(sparsity_pressure_mass);
 
     // Finally, we initialize the right-hand side and solution vectors.
     pcout << "  Initializing the system right-hand side" << std::endl;
-    residual_vector.reinit(locally_owned_dofs, MPI_COMM_WORLD);
+    residual_vector.reinit(block_owned_dofs, MPI_COMM_WORLD);
     pcout << "  Initializing the solution vector" << std::endl;
-    solution_owned.reinit(locally_owned_dofs, MPI_COMM_WORLD);
-    solution.reinit(locally_owned_dofs, locally_relevant_dofs, MPI_COMM_WORLD);
-    delta_owned.reinit(locally_owned_dofs, MPI_COMM_WORLD);
+    solution_owned.reinit(block_owned_dofs, MPI_COMM_WORLD);
+    solution.reinit(block_owned_dofs, block_relevant_dofs, MPI_COMM_WORLD);
+    delta_owned.reinit(block_owned_dofs, MPI_COMM_WORLD);
   }
 }
 
@@ -174,24 +175,36 @@ NonLinearDiffusion::assemble_system()
 {
   const unsigned int dofs_per_cell = fe->dofs_per_cell;
   const unsigned int n_q           = quadrature->size();
+  const unsigned int n_q_face      = quadrature_face->size();
 
   FEValues<dim> fe_values(*fe,
                           *quadrature,
                           update_values | update_gradients |
                             update_quadrature_points | update_JxW_values);
 
+  FEFaceValues<dim> fe_face_values(*fe,
+                                   *quadrature_face,
+                                   update_values | update_normal_vectors |
+                                     update_JxW_values);
+
   FullMatrix<double> cell_matrix(dofs_per_cell, dofs_per_cell);
+  FullMatrix<double> cell_pressure_mass_matrix(dofs_per_cell, dofs_per_cell);
   Vector<double>     cell_rhs(dofs_per_cell);
 
   std::vector<types::global_dof_index> dof_indices(dofs_per_cell);
 
-  jacobian_matrix = 0.0;
+  system_matrix   = 0.0;
   residual_vector = 0.0;
+  pressure_mass   = 0.0;
+
+  FEValuesExtractors::Vector velocity(0);
+  FEValuesExtractors::Scalar pressure(dim);
 
   // We use these vectors to store the old solution (i.e. at previous Newton
   // iteration) and its gradient on quadrature nodes of the current cell.
-  std::vector<double>         solution_loc(n_q);
-  std::vector<Tensor<1, dim>> solution_gradient_loc(n_q);
+  std::vector<Tensor<1, dim>> velocity_solution_loc(n_q);
+  std::vector<Tensor<2, dim>> velocity_solution_gradient_loc(n_q);
+  std::vector<double>         pressure_solution_loc(n_q);
 
   for (const auto &cell : dof_handler.active_cell_iterators())
     {
@@ -200,97 +213,198 @@ NonLinearDiffusion::assemble_system()
 
       fe_values.reinit(cell);
 
-      cell_matrix = 0.0;
-      cell_rhs    = 0.0;
+      cell_matrix               = 0.0;
+      cell_rhs                  = 0.0;
+      cell_pressure_mass_matrix = 0.0;
 
       // We need to compute the Jacobian matrix and the residual for current
       // cell. This requires knowing the value and the gradient of u^{(k)}
       // (stored inside solution) on the quadrature nodes of the current
       // cell. This can be accomplished through
       // FEValues::get_function_values and FEValues::get_function_gradients.
-      fe_values.get_function_values(solution, solution_loc);
-      fe_values.get_function_gradients(solution, solution_gradient_loc);
+      fe_values[velocity].get_function_values(solution, velocity_solution_loc);
+      fe_values[velocity].get_function_gradients(
+        solution, velocity_solution_gradient_loc);
+      fe_values[pressure].get_function_values(solution, pressure_solution_loc);
 
       for (unsigned int q = 0; q < n_q; ++q)
         {
-          const double mu_0_loc = mu_0.value(fe_values.quadrature_point(q));
-          const double mu_1_loc = mu_1.value(fe_values.quadrature_point(q));
-          const double f_loc =
-            forcing_term.value(fe_values.quadrature_point(q));
+          const double nu_loc = nu.value(fe_values.quadrature_point(q));
+
+          Vector<double> forcing_term_loc(dim);
+          forcing_term.vector_value(fe_values.quadrature_point(q),
+                                    forcing_term_loc);
+          Tensor<1, dim> forcing_term_tensor;
+          for (unsigned int d = 0; d < dim; ++d)
+            forcing_term_tensor[d] = forcing_term_loc[d];
 
           for (unsigned int i = 0; i < dofs_per_cell; ++i)
             {
-              //a(u)(delta,v)
+              // a(u)(delta,v)
               for (unsigned int j = 0; j < dofs_per_cell; ++j)
                 {
-                  //First term
+                  // Frechet derivative
+                  // First term
+                  cell_matrix(i, j) += fe_values[velocity].value(j, q) *
+                                       velocity_solution_gradient_loc[q] *
+                                       fe_values[velocity].value(i, q) *
+                                       fe_values.JxW(q);
+
+                  // Second term
+                  cell_matrix(i, j) += velocity_solution_loc[q] *
+                                       fe_values[velocity].gradient(j, q) *
+                                       fe_values[velocity].value(i, q) *
+                                       fe_values.JxW(q);
+
+                  // Third term
                   cell_matrix(i, j) +=
-                    (2.0 * mu_1_loc * solution_loc[q] *
-                     fe_values.shape_value(j, q)) *
-                    scalar_product(solution_gradient_loc[q],
-                                   fe_values.shape_grad(i, q)) *
+                    nu_loc *
+                    scalar_product(fe_values[velocity].gradient(j, q),
+                                   fe_values[velocity].gradient(i, q)) *
                     fe_values.JxW(q);
-                  //Second term
-                  cell_matrix(i, j) +=
-                    (mu_0_loc + mu_1_loc * solution_loc[q] * solution_loc[q]) *
-                    scalar_product(fe_values.shape_grad(j, q),
-                                   fe_values.shape_grad(i, q)) *
-                    fe_values.JxW(q);
+
+                  // Pressure term in the momentum equation.
+                  cell_matrix(i, j) -= fe_values[pressure].value(j, q) *
+                                       fe_values[velocity].divergence(i, q) *
+                                       fe_values.JxW(q);
+
+                  // Pressure term in the continuity equation.
+                  cell_matrix(i, j) -= fe_values[pressure].value(i, q) *
+                                       fe_values[velocity].divergence(j, q) *
+                                       fe_values.JxW(q);
+
+                  // Pressure mass matrix
+                  cell_pressure_mass_matrix(i, j) +=
+                    fe_values[pressure].value(i, q) *
+                    fe_values[pressure].value(j, q) / nu_loc * fe_values.JxW(q);
                 }
 
               //-R(u,v)
-              // -F(v)
-              cell_rhs(i) +=
-                f_loc * fe_values.shape_value(i, q) * fe_values.JxW(q);
-
-              // a(u)(v)
+              // a(u,v)
               cell_rhs(i) -=
-                (mu_0_loc + mu_1_loc * solution_loc[q] * solution_loc[q]) *
-                scalar_product(solution_gradient_loc[q],
-                               fe_values.shape_grad(i, q)) *
+                nu_loc *
+                scalar_product(velocity_solution_gradient_loc[q],
+                               fe_values[velocity].gradient(i, q)) *
                 fe_values.JxW(q);
+              // c(u;u,v)
+              cell_rhs(i) -= velocity_solution_loc[q] *
+                             velocity_solution_gradient_loc[q] *
+                             fe_values[velocity].value(i, q) * fe_values.JxW(q);
+              // b(v,p)
+              cell_rhs(i) += pressure_solution_loc[q] *
+                             fe_values[velocity].divergence(i, q) *
+                             fe_values.JxW(q);
+
+              double velocity_solution_divergence_loc =
+                trace(velocity_solution_gradient_loc[q]);
+
+              // b(u,q) - pressure contribution in the continuity equation
+              cell_rhs(i) += velocity_solution_divergence_loc *
+                             fe_values[pressure].value(i, q) * fe_values.JxW(q);
+
+              // Forcing term
+              cell_rhs(i) += scalar_product(forcing_term_tensor,
+                                            fe_values[velocity].value(i, q)) *
+                             fe_values.JxW(q);
+            }
+        }
+
+      // 6 borders
+      // 7 inlet
+      // 8 outlet
+
+      // Boundary integral for Neumann BCs.
+      if (cell->at_boundary())
+        {
+          for (unsigned int f = 0; f < cell->n_faces(); ++f)
+            {
+              if (cell->face(f)->at_boundary() &&
+                  cell->face(f)->boundary_id() == 8)
+                {
+                  fe_face_values.reinit(cell, f);
+
+                  for (unsigned int q = 0; q < n_q_face; ++q)
+                    {
+                      for (unsigned int i = 0; i < dofs_per_cell; ++i)
+                        {
+                          cell_rhs(i) -=
+                            p_out *
+                            scalar_product(fe_face_values.normal_vector(q),
+                                           fe_face_values[velocity].value(i,
+                                                                          q)) *
+                            fe_face_values.JxW(q);
+                        }
+                    }
+                }
             }
         }
 
       cell->get_dof_indices(dof_indices);
 
-      jacobian_matrix.add(dof_indices, cell_matrix);
+      system_matrix.add(dof_indices, cell_matrix);
+      pressure_mass.add(dof_indices, cell_pressure_mass_matrix);
       residual_vector.add(dof_indices, cell_rhs);
     }
 
-  jacobian_matrix.compress(VectorOperation::add);
+  system_matrix.compress(VectorOperation::add);
+  pressure_mass.compress(VectorOperation::add);
   residual_vector.compress(VectorOperation::add);
 
-  // Boundary conditions.
+  // Dirichlet Boundary conditions.
   {
     std::map<types::global_dof_index, double> boundary_values;
 
     std::map<types::boundary_id, const Function<dim> *> boundary_functions;
     Functions::ZeroFunction<dim>                        zero_function;
 
-    for (unsigned int i = 0; i < 6; ++i)
-      boundary_functions[i] = &zero_function;
+    // 6 borders
+    // 7 inlet
+    // 8 outlet
+    
+    boundary_functions[7] = &inlet_velocity;
+    // boundary_functions[8] = &functionG;
+
 
     VectorTools::interpolate_boundary_values(dof_handler,
                                              boundary_functions,
-                                             boundary_values);
+                                             boundary_values,
+                                             ComponentMask(
+                                               {true, true, false}));
+
+    boundary_functions.clear();
+    boundary_functions[6] = &zero_function;
+
+    VectorTools::interpolate_boundary_values(dof_handler,
+                                             boundary_functions,
+                                             boundary_values,
+                                             ComponentMask(
+                                               {true, true, false}));
 
     MatrixTools::apply_boundary_values(
-      boundary_values, jacobian_matrix, delta_owned, residual_vector, true);
+      boundary_values, system_matrix, solution, residual_vector, false);
   }
 }
 
 void
 NonLinearDiffusion::solve_system()
 {
-  SolverControl solver_control(1000, 1e-6 * residual_vector.l2_norm());
+  SolverControl solver_control(1000000, 1e-6 * residual_vector.l2_norm());
 
-  SolverGMRES<TrilinosWrappers::MPI::Vector> solver(solver_control);
-  TrilinosWrappers::PreconditionSSOR         preconditioner;
-  preconditioner.initialize(
-    jacobian_matrix, TrilinosWrappers::PreconditionSSOR::AdditionalData(1.0));
+  // TODO preconditioner
 
-  solver.solve(jacobian_matrix, delta_owned, residual_vector, preconditioner);
+  SolverGMRES<TrilinosWrappers::MPI::BlockVector> solver(solver_control);
+
+  PreconditionBlockTriangular preconditioner;
+  preconditioner.initialize(system_matrix.block(0, 0),
+                            pressure_mass.block(1, 1),
+                            system_matrix.block(1, 0));
+
+  //TrilinosWrappers::PreconditionSSOR         preconditioner;
+  //preconditioner.initialize(
+  //  system_matrix, TrilinosWrappers::PreconditionSSOR::AdditionalData(1.0));
+  
+
+  solver.solve(system_matrix, delta_owned, residual_vector, preconditioner);
   pcout << "   " << solver_control.last_step() << " GMRES iterations"
         << std::endl;
 }
@@ -300,12 +414,31 @@ NonLinearDiffusion::solve_newton()
 {
   pcout << "===============================================" << std::endl;
 
-  const unsigned int n_max_iters        = 1000;
+  const unsigned int n_max_iters        = 1500;
   const double       residual_tolerance = 1e-6;
 
   unsigned int n_iter        = 0;
   double       residual_norm = residual_tolerance + 1;
 
+  // We apply the boundary conditions to the initial guess (which is stored in
+  // solution_owned and solution).
+  {
+    IndexSet dirichlet_dofs = DoFTools::extract_boundary_dofs(dof_handler);
+
+    // function_g.set_time(time);
+
+    TrilinosWrappers::MPI::BlockVector vector_dirichlet(solution_owned);
+    VectorTools::interpolate(dof_handler,
+                             inlet_velocity,
+                             vector_dirichlet);
+
+    for (const auto &idx : dirichlet_dofs)
+      solution_owned[idx] = vector_dirichlet[idx];
+
+    solution_owned.compress(VectorOperation::insert);
+    solution = solution_owned;
+  }
+  
   while (n_iter < n_max_iters && residual_norm > residual_tolerance)
     {
       assemble_system();
@@ -319,7 +452,7 @@ NonLinearDiffusion::solve_newton()
       // tolerance.
       if (residual_norm > residual_tolerance)
         {
-          solve_system(); //This linear system is set up to solve u
+          solve_system(); // This linear system is set up to solve u
 
           solution_owned += delta_owned;
           solution = solution_owned;
@@ -328,6 +461,10 @@ NonLinearDiffusion::solve_newton()
         {
           pcout << " < tolerance" << std::endl;
         }
+      
+      /*if(residual_norm < 1.0){
+        return;
+      }*/
 
       ++n_iter;
     }
@@ -338,8 +475,21 @@ NonLinearDiffusion::solve_newton()
 void
 NonLinearDiffusion::output() const
 {
+  pcout << "===============================================" << std::endl;
+
   DataOut<dim> data_out;
-  data_out.add_data_vector(dof_handler, solution, "u");
+
+  std::vector<DataComponentInterpretation::DataComponentInterpretation>
+    data_component_interpretation(
+      dim, DataComponentInterpretation::component_is_part_of_vector);
+  data_component_interpretation.push_back(
+    DataComponentInterpretation::component_is_scalar);
+  std::vector<std::string> names = {"velocity", "velocity", "pressure"};
+
+  data_out.add_data_vector(dof_handler,
+                           solution,
+                           names,
+                           data_component_interpretation);
 
   std::vector<unsigned int> partition_int(mesh.n_active_cells());
   GridTools::get_subdomain_association(mesh, partition_int);
@@ -348,13 +498,12 @@ NonLinearDiffusion::output() const
 
   data_out.build_patches();
 
-  const std::string output_file_name = "output-nonlineardiffusion";
+  const std::string output_file_name = "output-ns";
   data_out.write_vtu_with_pvtu_record("./",
                                       output_file_name,
                                       0,
                                       MPI_COMM_WORLD);
 
-  pcout << "Output written to " << output_file_name << "." << std::endl;
-
+  pcout << "Output written to " << output_file_name << std::endl;
   pcout << "===============================================" << std::endl;
 }
