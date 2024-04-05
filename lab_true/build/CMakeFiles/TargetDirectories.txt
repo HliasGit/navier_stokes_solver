@@ -1,0 +1,3 @@
+/home/elia/source/navier_stokes_solver/lab_true/build/CMakeFiles/rebuild_cache.dir
+/home/elia/source/navier_stokes_solver/lab_true/build/CMakeFiles/edit_cache.dir
+/home/elia/source/navier_stokes_solver/lab_true/build/CMakeFiles/NSSolverTest.dir

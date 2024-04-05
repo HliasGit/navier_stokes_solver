@@ -178,13 +178,15 @@ public:
   // Constructor.
   NonLinearDiffusion(const std::string &mesh_file_name_,
                      const unsigned int &degree_velocity_,
-                     const unsigned int &degree_pressure_)
+                     const unsigned int &degree_pressure_,
+                     const double gamma_)
     : mpi_size(Utilities::MPI::n_mpi_processes(MPI_COMM_WORLD))
     , mpi_rank(Utilities::MPI::this_mpi_process(MPI_COMM_WORLD))
     , pcout(std::cout, mpi_rank == 0)
     , mesh_file_name(mesh_file_name_)
     , degree_velocity(degree_velocity_)
     , degree_pressure(degree_pressure_)
+    , gamma(gamma_)
     , mesh(MPI_COMM_WORLD)
   {}
 
@@ -224,6 +226,9 @@ protected:
 
   // nu coefficient.
   FunctionNu nu;
+
+  // gamma coefficient
+  const double gamma;
 
   // Forcing term.
   ForcingTerm forcing_term;

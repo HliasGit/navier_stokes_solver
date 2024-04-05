@@ -256,7 +256,7 @@ NonLinearDiffusion::assemble_system()
                                        fe_values[velocity].value(i, q) *
                                        fe_values.JxW(q);
 
-                  // Third term
+                  // Third term - viscosity
                   cell_matrix(i, j) +=
                     nu_loc *
                     scalar_product(fe_values[velocity].gradient(j, q),
@@ -269,9 +269,13 @@ NonLinearDiffusion::assemble_system()
                                        fe_values.JxW(q);
 
                   // Pressure term in the continuity equation.
-                  cell_matrix(i, j) -= fe_values[pressure].value(i, q) *
+                  cell_matrix(i, j) += fe_values[pressure].value(i, q) *
                                        fe_values[velocity].divergence(j, q) *
                                        fe_values.JxW(q);
+
+                  // Augmented Lagrangian term
+                  cell_matrix(i,j) -= gamma * fe_values[velocity].divergence(i,q) *
+                                              fe_values[velocity].divergence(j,q) * fe_values.JxW(q);
 
                   // Pressure mass matrix
                   cell_pressure_mass_matrix(i, j) +=
@@ -306,6 +310,11 @@ NonLinearDiffusion::assemble_system()
               cell_rhs(i) += scalar_product(forcing_term_tensor,
                                             fe_values[velocity].value(i, q)) *
                              fe_values.JxW(q);
+
+              // Augmented Lagrangian
+              cell_rhs(i) -= gamma * velocity_solution_divergence_loc *
+                                     fe_values[velocity].divergence(i,q) *
+                                     fe_values.JxW(q);
             }
         }
 
