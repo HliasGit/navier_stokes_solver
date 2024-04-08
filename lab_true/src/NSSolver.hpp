@@ -14,6 +14,7 @@
 #include <deal.II/fe/fe_q.h>
 #include <deal.II/fe/fe_system.h>
 #include <deal.II/fe/fe_values.h>
+#include <deal.II/fe/fe_simplex_p.h>
 
 #include <deal.II/grid/grid_generator.h>
 #include <deal.II/grid/grid_in.h>
@@ -55,25 +56,47 @@ public:
   // Physical dimension
   static constexpr unsigned int dim = 2;
 
-  NSSolver(const std::string  &mesh_path_,
+  class InletVelocity : public Function<dim>
+  {
+  public:
+    InletVelocity()
+        : Function<dim>(dim + 1)
+    {
+    }
+
+    virtual void
+    vector_value(const Point<dim> &p, Vector<double> &values) const override
+    {
+      for (unsigned int i = 0; i < dim + 1; ++i)
+        values[i] = 1.0;
+    }
+
+    virtual double
+    value(const Point<dim> &p, const unsigned int component = 0) const override
+    {
+      return 1.0;
+    }
+  };
+
+  NSSolver(const std::string &mesh_path_,
            const unsigned int &degree_velocity_,
            const unsigned int &degree_pressure_,
-           const double        viscosity_)
-    : mesh_path(mesh_path_)
-    , degree_velocity(degree_velocity_)
-    , degree_pressure(degree_pressure_)
-    , mpi_size(Utilities::MPI::n_mpi_processes(MPI_COMM_WORLD))
-    , mpi_rank(Utilities::MPI::this_mpi_process(MPI_COMM_WORLD))
-    , viscosity(viscosity_)
-    , gamma(1.0)
-    , pcout(std::cout, mpi_rank == 0)
-    , mesh(MPI_COMM_WORLD)
-  {}
+           const double viscosity_)
+      : mesh_path(mesh_path_), degree_velocity(degree_velocity_), degree_pressure(degree_pressure_), mpi_size(Utilities::MPI::n_mpi_processes(MPI_COMM_WORLD)), mpi_rank(Utilities::MPI::this_mpi_process(MPI_COMM_WORLD)), viscosity(viscosity_), gamma(1.0), pcout(std::cout, mpi_rank == 0), mesh(MPI_COMM_WORLD)
+  {
+  }
+
+  void
+  run();
+
+  void
+  output();
 
   void
   setup();
 
 protected:
+
   void
   setup_mesh();
 
@@ -92,18 +115,42 @@ protected:
   void
   assemble(const bool, const bool);
 
+  void
+  assemble_system(const bool);
+
+  void
+  assemble_rhs(const bool);
+
+  void
+  solve(const bool);
+
+  void
+  apply_dirichlet(TrilinosWrappers::MPI::BlockVector);
+
+  void
+  newton_iteration(const double, const unsigned int, const bool, const bool);
+
+  void
+  compute_initial_guess(double); 
+
   // Generic variables
-  const std::string  mesh_path;
+  const std::string mesh_path;
   const unsigned int degree_velocity;
   const unsigned int degree_pressure;
   const unsigned int mpi_size;
   const unsigned int mpi_rank;
 
   // Viscosity
-  const double viscosity;
+  double viscosity;
 
   // Gamma
   const double gamma;
+
+  // POut
+  const double p_out = 1.0;
+
+  // Inlet Velocity
+  InletVelocity inlet_velocity;
 
   // Parallel output stream.
   ConditionalOStream pcout;
@@ -114,6 +161,9 @@ protected:
   // System matrices
   TrilinosWrappers::BlockSparseMatrix system_matrix;
   TrilinosWrappers::BlockSparseMatrix pressure_mass_matrix;
+
+  // Sparsity pattern
+  TrilinosWrappers::BlockSparsityPattern sparsity;
 
   // System vectors
   TrilinosWrappers::MPI::BlockVector solution_owned;

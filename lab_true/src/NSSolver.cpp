@@ -51,8 +51,8 @@ NSSolver::setup_finite_element()
   // Initialize the finite element space. This is the same as in serial codes.
   pcout << "Initializing the finite element space" << std::endl;
 
-  const FE_Q<dim> fe_scalar_velocity(degree_velocity);
-  const FE_Q<dim> fe_scalar_pressure(degree_pressure);
+  const FE_SimplexP<dim> fe_scalar_velocity(degree_velocity);
+  const FE_SimplexP<dim> fe_scalar_pressure(degree_pressure);
   fe = std::make_unique<FESystem<dim>>(fe_scalar_velocity,
                                        dim,
                                        fe_scalar_pressure,
@@ -147,8 +147,7 @@ NSSolver::setup_system()
         }
     }
 
-  TrilinosWrappers::BlockSparsityPattern sparsity(block_owned_dofs,
-                                                  MPI_COMM_WORLD);
+  
   DoFTools::make_sparsity_pattern(dof_handler, coupling, sparsity);
   sparsity.compress();
 
@@ -165,6 +164,9 @@ NSSolver::setup_system()
     }
   TrilinosWrappers::BlockSparsityPattern sparsity_pressure_mass(
     block_owned_dofs, MPI_COMM_WORLD);
+
+  sparsity = TrilinosWrappers::BlockSparsityPattern(block_owned_dofs,
+                                                  MPI_COMM_WORLD);  
   DoFTools::make_sparsity_pattern(dof_handler,
                                   coupling,
                                   sparsity_pressure_mass);
@@ -190,6 +192,7 @@ NSSolver::assemble(const bool initial_step, const bool assemble_matrix)
 {
   if (assemble_matrix)
     {
+      pressure_mass_matrix = 0;
       system_matrix = 0;
     }
 
@@ -236,6 +239,7 @@ NSSolver::assemble(const bool initial_step, const bool assemble_matrix)
 
       fe_values.reinit(cell);
 
+      local_pressure_mass_matrix = 0;
       local_matrix = 0;
       local_rhs    = 0;
 
@@ -327,7 +331,271 @@ NSSolver::assemble(const bool initial_step, const bool assemble_matrix)
                               present_velocity_divergence * fe_values.JxW(q);
             }
         }
+
+
+
+      pcout << "pre boundary" << std::endl;
+
+      // 6 borders
+      // 7 inlet
+      // 8 outlet
+
+      // Boundary integral for Neumann BCs.
+      if (cell->at_boundary())
+        {
+          for (unsigned int f = 0; f < cell->n_faces(); ++f)
+            {
+              if (cell->face(f)->at_boundary() &&
+                  cell->face(f)->boundary_id() == 8)
+                {
+                  fe_face_values.reinit(cell, f);
+
+                  for (unsigned int q = 0; q < n_q_face; ++q)
+                    {
+                      for (unsigned int i = 0; i < dofs_per_cell; ++i)
+                        {
+                          local_rhs(i) -=
+                            p_out *
+                            scalar_product(fe_face_values.normal_vector(q),
+                                           phi_u[i]) *
+                            fe_face_values.JxW(q);
+                        }
+                    }
+                }
+            }
+        }
+
+      cell->get_dof_indices(local_dof_indices);
+
+      pcout << "post dof indices" << std::endl;
+
+      if(assemble_matrix){
+        system_matrix.add(local_dof_indices, local_matrix);
+        system_rhs.add(local_dof_indices, local_rhs);
+      }
+      else{
+        system_rhs.add(local_dof_indices, local_rhs);
+      }
+
+      pcout << "post assemble matrix"<< std::endl;
+
+
+      if (assemble_matrix)
+      {
+        pressure_mass_matrix.add(local_dof_indices, local_pressure_mass_matrix);
+      }
     }
+
+      pcout << "Post for" << std::endl;
+
+    system_matrix.compress(VectorOperation::add);
+    pressure_mass_matrix.compress(VectorOperation::add);
+    system_rhs.compress(VectorOperation::add);
+
+  apply_dirichlet(solution);
+}
+
+void
+NSSolver::assemble_system(const bool initial_step)
+{
+  assemble(initial_step, true);
+}
+
+void
+NSSolver::assemble_rhs(const bool initial_step)
+{
+  assemble(initial_step, false);
+}
+
+void
+NSSolver::solve(const bool initial_step){
+    SolverControl solver_control(system_matrix.m(),
+                                 1e-4 * system_rhs.l2_norm(),
+                                 true);
+ 
+    SolverFGMRES<TrilinosWrappers::MPI::BlockVector> gmres(solver_control);
+ 
+    gmres.solve(system_matrix, newton_update, system_rhs, PreconditionIdentity());
+    pcout << "FGMRES steps: " << solver_control.last_step() << std::endl;
+ 
+    apply_dirichlet(newton_update);
+}
+
+void
+NSSolver::apply_dirichlet(TrilinosWrappers::MPI::BlockVector solution_to_apply){
+
+      // Dirichlet Boundary conditions.
+    std::map<types::global_dof_index, double> boundary_values;
+
+    std::map<types::boundary_id, const Function<dim> *> boundary_functions;
+    Functions::ZeroFunction<dim>                        zero_function;
+
+    // 6 borders
+    // 7 inlet
+    // 8 outlet
+    
+    boundary_functions[7] = &inlet_velocity;
+    // boundary_functions[8] = &functionG;
+
+
+    VectorTools::interpolate_boundary_values(dof_handler,
+                                             boundary_functions,
+                                             boundary_values,
+                                             ComponentMask(
+                                               {true, true, false}));
+
+    boundary_functions.clear();
+    boundary_functions[6] = &zero_function;
+
+    VectorTools::interpolate_boundary_values(dof_handler,
+                                             boundary_functions,
+                                             boundary_values,
+                                             ComponentMask(
+                                               {true, true, false}));
+
+
+    // Check that solution vector is the right one
+    MatrixTools::apply_boundary_values(
+      boundary_values, system_matrix, solution_to_apply, system_rhs, false);
+}
+
+
+void
+NSSolver::newton_iteration(
+  const double       tolerance,
+  const unsigned int max_n_line_searches,
+  const bool         is_initial_step,
+  const bool         output_result)
+{
+  bool first_step = is_initial_step;
+    double last_res = 1.0;
+    double current_res = 1.0;
+    unsigned int line_search_n = 0; 
+    while ((first_step || (current_res > tolerance)) &&
+            line_search_n < max_n_line_searches)
+      {
+        if (first_step)
+          {
+            // setup_dofs();
+            setup();
+            evaluation_point = solution;
+            assemble_system(first_step);
+            pcout << "Bro sono arrivato" << std::endl;
+            solve(first_step);
+            solution = newton_update;
+            apply_dirichlet(solution);
+            first_step       = false;
+            evaluation_point = solution;
+            assemble_rhs(first_step);
+            current_res = system_rhs.l2_norm();
+            std::cout << "The residual of initial guess is " << current_res
+                      << std::endl;
+            last_res = current_res;
+          }
+        else
+          {
+            evaluation_point = solution;
+            assemble_system(first_step);
+            solve(first_step);
+
+            for (double alpha = 1.0; alpha > 1e-5; alpha *= 0.5)
+              {
+                evaluation_point = solution;
+                evaluation_point.add(alpha, newton_update);
+                apply_dirichlet(evaluation_point);
+                assemble_rhs(first_step);
+                current_res = system_rhs.l2_norm();
+                std::cout << "  alpha: " << std::setw(10) << alpha
+                          << std::setw(0) << "  residual: " << current_res
+                          << std::endl;
+                if (current_res < last_res)
+                  break;
+              }
+            {
+              solution = evaluation_point;
+              std::cout << "  number of line searches: " << line_search_n
+                        << "  residual: " << current_res << std::endl;
+              last_res = current_res;
+            }
+            ++line_search_n;
+          }
+      }
+}
+
+void
+NSSolver::compute_initial_guess(double step_size)
+  {
+    const double target_Re = 1.0 / viscosity;
+ 
+    bool is_initial_step = true;
+ 
+    for (double Re = 1000.0; Re < target_Re;
+         Re        = std::min(Re + step_size, target_Re))
+      {
+        viscosity = 1.0 / Re;
+        std::cout << "Searching for initial guess with Re = " << Re
+                  << std::endl;
+        newton_iteration(1e-12, 50, is_initial_step, false);
+        is_initial_step = false;
+      }
+  }
+
+void
+NSSolver::run()
+  { 
+    const double Re = 1.0 / viscosity;
+ 
+    if (Re > 1000.0)
+      {
+        std::cout << "Searching for initial guess ..." << std::endl;
+        const double step_size = 2000.0;
+        compute_initial_guess(step_size);
+        std::cout << "Found initial guess." << std::endl;
+        std::cout << "Computing solution with target Re = " << Re << std::endl;
+        viscosity = 1.0 / Re;
+        newton_iteration(1e-12, 50, false, true);
+      }
+    else
+      {
+ 
+        newton_iteration(1e-12, 50, true, true);
+      }
+  }
+
+void
+NSSolver::output()
+{
+  print_line();
+
+  DataOut<dim> data_out;
+
+  std::vector<DataComponentInterpretation::DataComponentInterpretation>
+    data_component_interpretation(
+      dim, DataComponentInterpretation::component_is_part_of_vector);
+  data_component_interpretation.push_back(
+    DataComponentInterpretation::component_is_scalar);
+  std::vector<std::string> names = {"velocity", "velocity", "pressure"};
+
+  data_out.add_data_vector(dof_handler,
+                           solution,
+                           names,
+                           data_component_interpretation);
+
+  std::vector<unsigned int> partition_int(mesh.n_active_cells());
+  GridTools::get_subdomain_association(mesh, partition_int);
+  const Vector<double> partitioning(partition_int.begin(), partition_int.end());
+  data_out.add_data_vector(partitioning, "partitioning");
+
+  data_out.build_patches();
+
+  const std::string output_file_name = "output-ns";
+  data_out.write_vtu_with_pvtu_record("./",
+                                      output_file_name,
+                                      0,
+                                      MPI_COMM_WORLD);
+
+  pcout << "Output written to " << output_file_name << std::endl;
+  print_line();
 }
 
 void

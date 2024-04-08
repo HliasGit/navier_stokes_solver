@@ -12,7 +12,8 @@ main(int argc, char *argv[])
 
   NSSolver problem(mesh_file_name, degree_velocity, degree_pressure, 100.00);
 
-  problem.setup();
+  problem.run();
+  problem.output();
 
   return 0;
 }
