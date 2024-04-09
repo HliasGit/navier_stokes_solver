@@ -162,9 +162,6 @@ protected:
   TrilinosWrappers::BlockSparseMatrix system_matrix;
   TrilinosWrappers::BlockSparseMatrix pressure_mass_matrix;
 
-  // Sparsity pattern
-  TrilinosWrappers::BlockSparsityPattern sparsity;
-
   // System vectors
   TrilinosWrappers::MPI::BlockVector solution_owned;
   TrilinosWrappers::MPI::BlockVector solution;

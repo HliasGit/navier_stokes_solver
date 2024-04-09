@@ -80,10 +80,6 @@ NSSolver::setup_dofs()
   // Init Dofs
   pcout << "Initializing the DoF Handler" << std::endl;
 
-  // Clear system matrices
-  system_matrix.clear();
-  pressure_mass_matrix.clear();
-
   // Reinit DoF Handler after mesh loading
   dof_handler.reinit(mesh);
 
@@ -147,7 +143,8 @@ NSSolver::setup_system()
         }
     }
 
-  
+  TrilinosWrappers::BlockSparsityPattern sparsity(block_owned_dofs,
+                                                  MPI_COMM_WORLD);
   DoFTools::make_sparsity_pattern(dof_handler, coupling, sparsity);
   sparsity.compress();
 
@@ -165,8 +162,6 @@ NSSolver::setup_system()
   TrilinosWrappers::BlockSparsityPattern sparsity_pressure_mass(
     block_owned_dofs, MPI_COMM_WORLD);
 
-  sparsity = TrilinosWrappers::BlockSparsityPattern(block_owned_dofs,
-                                                  MPI_COMM_WORLD);  
   DoFTools::make_sparsity_pattern(dof_handler,
                                   coupling,
                                   sparsity_pressure_mass);
@@ -190,13 +185,9 @@ NSSolver::setup_system()
 void
 NSSolver::assemble(const bool initial_step, const bool assemble_matrix)
 {
-  if (assemble_matrix)
-    {
-      pressure_mass_matrix = 0;
-      system_matrix = 0;
-    }
-
-  system_rhs = 0;
+  const unsigned int dofs_per_cell = fe->dofs_per_cell;
+  const unsigned int n_q           = quadrature->size();
+  const unsigned int n_q_face      = quadrature_face->size();
 
   FEValues<dim> fe_values(*fe,
                           *quadrature,
@@ -208,29 +199,29 @@ NSSolver::assemble(const bool initial_step, const bool assemble_matrix)
                                    update_values | update_normal_vectors |
                                      update_JxW_values);
 
-  const unsigned int dofs_per_cell = fe->dofs_per_cell;
-  const unsigned int n_q_points    = quadrature->size();
-  const unsigned int n_q_face      = quadrature_face->size();
+  FullMatrix<double> cell_matrix(dofs_per_cell, dofs_per_cell);
+  FullMatrix<double> cell_pressure_mass_matrix(dofs_per_cell, dofs_per_cell);
+  Vector<double>     cell_rhs(dofs_per_cell);
+
+  std::vector<types::global_dof_index> dof_indices(dofs_per_cell);
+
+  if (assemble_matrix)
+    {
+      system_matrix = 0.0;
+      pressure_mass_matrix = 0.0;
+    }
+
+  system_rhs = 0.0;
 
   FEValuesExtractors::Vector velocity(0);
   FEValuesExtractors::Scalar pressure(dim);
 
-  FullMatrix<double> local_matrix(dofs_per_cell, dofs_per_cell);
-  FullMatrix<double> local_pressure_mass_matrix(dofs_per_cell, dofs_per_cell);
-  Vector<double>     local_rhs(dofs_per_cell);
 
-  std::vector<types::global_dof_index> local_dof_indices(dofs_per_cell);
-
-  // We create temporary storage for present velocity and gradient, and present
-  // pressure
-  std::vector<Tensor<1, dim>> present_velocity_values(n_q_points);
-  std::vector<Tensor<2, dim>> present_velocity_gradients(n_q_points);
-  std::vector<double>         present_pressure_values(n_q_points);
-
-  std::vector<double>         div_phi_u(dofs_per_cell);
-  std::vector<Tensor<1, dim>> phi_u(dofs_per_cell);
-  std::vector<Tensor<2, dim>> grad_phi_u(dofs_per_cell);
-  std::vector<double>         phi_p(dofs_per_cell);
+  // We use these vectors to store the old solution (i.e. at previous Newton
+  // iteration) and its gradient on quadrature nodes of the current cell.
+  std::vector<Tensor<1, dim>> velocity_solution_loc(n_q);
+  std::vector<Tensor<2, dim>> velocity_solution_gradient_loc(n_q);
+  std::vector<double>         pressure_solution_loc(n_q);
 
   for (const auto &cell : dof_handler.active_cell_iterators())
     {
@@ -239,102 +230,113 @@ NSSolver::assemble(const bool initial_step, const bool assemble_matrix)
 
       fe_values.reinit(cell);
 
-      local_pressure_mass_matrix = 0;
-      local_matrix = 0;
-      local_rhs    = 0;
+      cell_matrix               = 0.0;
+      cell_rhs                  = 0.0;
+      cell_pressure_mass_matrix = 0.0;
 
-      fe_values[velocity].get_function_values(evaluation_point,
-                                              present_velocity_values);
+      // We need to compute the Jacobian matrix and the residual for current
+      // cell. This requires knowing the value and the gradient of u^{(k)}
+      // (stored inside solution) on the quadrature nodes of the current
+      // cell. This can be accomplished through
+      // FEValues::get_function_values and FEValues::get_function_gradients.
+      fe_values[velocity].get_function_values(solution, velocity_solution_loc);
+      fe_values[velocity].get_function_gradients(
+        solution, velocity_solution_gradient_loc);
+      fe_values[pressure].get_function_values(solution, pressure_solution_loc);
 
-      fe_values[velocity].get_function_gradients(evaluation_point,
-                                                 present_velocity_gradients);
-
-      fe_values[pressure].get_function_values(evaluation_point,
-                                              present_pressure_values);
-
-      for (unsigned int q = 0; q < n_q_points; ++q)
+      for (unsigned int q = 0; q < n_q; ++q)
         {
-          for (unsigned int k = 0; k < dofs_per_cell; ++k)
-            {
-              div_phi_u[k]  = fe_values[velocity].divergence(k, q);
-              grad_phi_u[k] = fe_values[velocity].gradient(k, q);
-              phi_u[k]      = fe_values[velocity].value(k, q);
-              phi_p[k]      = fe_values[pressure].value(k, q);
-            }
+          const double nu_loc = viscosity;
+
+          //   Vector<double> forcing_term_loc(dim);
+          //   forcing_term.vector_value(fe_values.quadrature_point(q),
+          //                             forcing_term_loc);
+          //   Tensor<1, dim> forcing_term_tensor;
+          //   for (unsigned int d = 0; d < dim; ++d)
+          //     forcing_term_tensor[d] = forcing_term_loc[d];
 
           for (unsigned int i = 0; i < dofs_per_cell; ++i)
             {
-              if (assemble_matrix)
+              // a(u)(delta,v)
+              for (unsigned int j = 0; j < dofs_per_cell; ++j)
                 {
-                  for (unsigned int j = 0; j < dofs_per_cell; ++j)
-                    {
-                      local_matrix(i, j) +=
-                        (phi_u[i] *
-                         (present_velocity_gradients[q] * phi_u[j])) *
-                        fe_values.JxW(q);
+                  // Frechet derivative
+                  // First term
+                  cell_matrix(i, j) += fe_values[velocity].value(j, q) *
+                                       velocity_solution_gradient_loc[q] *
+                                       fe_values[velocity].value(i, q) *
+                                       fe_values.JxW(q);
 
-                      local_matrix(i, j) +=
-                        (phi_u[i] *
-                         (grad_phi_u[j] * present_velocity_values[q])) *
-                        fe_values.JxW(q);
+                  // Second term
+                  cell_matrix(i, j) += velocity_solution_loc[q] *
+                                       fe_values[velocity].gradient(j, q) *
+                                       fe_values[velocity].value(i, q) *
+                                       fe_values.JxW(q);
 
-                      local_matrix(i, j) +=
-                        viscosity *
-                        scalar_product(grad_phi_u[i], grad_phi_u[j]) *
-                        fe_values.JxW(q);
+                  // Third term - viscosity
+                  cell_matrix(i, j) +=
+                    nu_loc *
+                    scalar_product(fe_values[velocity].gradient(j, q),
+                                   fe_values[velocity].gradient(i, q)) *
+                    fe_values.JxW(q);
 
-                      // Pressure term in the momentum equation.
-                      local_matrix(i, j) -=
-                        div_phi_u[i] * phi_p[j] * fe_values.JxW(q);
+                  // Pressure term in the momentum equation.
+                  cell_matrix(i, j) -= fe_values[pressure].value(j, q) *
+                                       fe_values[velocity].divergence(i, q) *
+                                       fe_values.JxW(q);
 
-                      // Pressure term in the continuity equation.
-                      local_matrix(i, j) -=
-                        phi_p[i] * div_phi_u[j] * fe_values.JxW(q);
+                  // Pressure term in the continuity equation.
+                  cell_matrix(i, j) += fe_values[pressure].value(i, q) *
+                                       fe_values[velocity].divergence(j, q) *
+                                       fe_values.JxW(q);
 
-                      // Augmented Lagrangian term
-                      local_matrix(i, j) +=
-                        gamma * div_phi_u[i] * div_phi_u[j] * fe_values.JxW(q);
+                  // Augmented Lagrangian term
+                  cell_matrix(i, j) -=
+                    gamma * fe_values[velocity].divergence(i, q) *
+                    fe_values[velocity].divergence(j, q) * fe_values.JxW(q);
 
-                      // Pressure mass
-                      local_matrix(i, j) +=
-                        phi_p[i] * phi_p[j] * fe_values.JxW(q);
-                    }
+                  // Pressure mass matrix
+                  cell_pressure_mass_matrix(i, j) +=
+                    fe_values[pressure].value(i, q) *
+                    fe_values[pressure].value(j, q) / nu_loc * fe_values.JxW(q);
                 }
 
-              // RHS -R(u,v)
-              double present_velocity_divergence =
-                trace(present_velocity_gradients[q]);
-
+              //-R(u,v)
               // a(u,v)
-              local_rhs(i) -=
-                viscosity *
-                scalar_product(grad_phi_u[i], present_velocity_gradients[q]) *
+              cell_rhs(i) -=
+                nu_loc *
+                scalar_product(velocity_solution_gradient_loc[q],
+                               fe_values[velocity].gradient(i, q)) *
                 fe_values.JxW(q);
-
               // c(u;u,v)
-              local_rhs(i) -= (phi_u[i] * (present_velocity_gradients[q] *
-                                           present_velocity_values[q])) *
-                              fe_values.JxW(q);
-
+              cell_rhs(i) -= velocity_solution_loc[q] *
+                             velocity_solution_gradient_loc[q] *
+                             fe_values[velocity].value(i, q) * fe_values.JxW(q);
               // b(v,p)
-              local_rhs(i) +=
-                div_phi_u[i] * present_pressure_values[q] * fe_values.JxW(q);
+              cell_rhs(i) += pressure_solution_loc[q] *
+                             fe_values[velocity].divergence(i, q) *
+                             fe_values.JxW(q);
+
+              double velocity_solution_divergence_loc =
+                trace(velocity_solution_gradient_loc[q]);
 
               // b(u,q) - pressure contribution in the continuity equation
-              local_rhs(i) +=
-                phi_p[i] * present_velocity_divergence * fe_values.JxW(q);
+              cell_rhs(i) += velocity_solution_divergence_loc *
+                             fe_values[pressure].value(i, q) * fe_values.JxW(q);
 
-              // TODO: Forcing Term
+              // TODO Forcing term
+              //   cell_rhs(i) += scalar_product(forcing_term_tensor,
+              //                                 fe_values[velocity].value(i,
+              //                                 q)) *
+              //                  fe_values.JxW(q);
 
               // Augmented Lagrangian
-              local_rhs(i) += gamma * div_phi_u[i] *
-                              present_velocity_divergence * fe_values.JxW(q);
+              cell_rhs(i) -= gamma * velocity_solution_divergence_loc *
+                             fe_values[velocity].divergence(i, q) *
+                             fe_values.JxW(q);
             }
         }
 
-
-
-      pcout << "pre boundary" << std::endl;
 
       // 6 borders
       // 7 inlet
@@ -354,10 +356,11 @@ NSSolver::assemble(const bool initial_step, const bool assemble_matrix)
                     {
                       for (unsigned int i = 0; i < dofs_per_cell; ++i)
                         {
-                          local_rhs(i) -=
+                          cell_rhs(i) -=
                             p_out *
                             scalar_product(fe_face_values.normal_vector(q),
-                                           phi_u[i]) *
+                                           fe_face_values[velocity].value(i,
+                                                                          q)) *
                             fe_face_values.JxW(q);
                         }
                     }
@@ -365,32 +368,28 @@ NSSolver::assemble(const bool initial_step, const bool assemble_matrix)
             }
         }
 
-      cell->get_dof_indices(local_dof_indices);
+      cell->get_dof_indices(dof_indices);
 
-      pcout << "post dof indices" << std::endl;
-
-      if(assemble_matrix){
-        system_matrix.add(local_dof_indices, local_matrix);
-        system_rhs.add(local_dof_indices, local_rhs);
-      }
-      else{
-        system_rhs.add(local_dof_indices, local_rhs);
-      }
-
-      pcout << "post assemble matrix"<< std::endl;
+      if (assemble_matrix)
+        {
+          system_matrix.add(dof_indices, cell_matrix);
+          system_rhs.add(dof_indices, cell_rhs);
+        }
+      else
+        {
+          system_rhs.add(dof_indices, cell_rhs);
+        }
 
 
       if (assemble_matrix)
-      {
-        pressure_mass_matrix.add(local_dof_indices, local_pressure_mass_matrix);
-      }
+        {
+          pressure_mass_matrix.add(dof_indices, cell_pressure_mass_matrix);
+        }
     }
 
-      pcout << "Post for" << std::endl;
-
-    system_matrix.compress(VectorOperation::add);
-    pressure_mass_matrix.compress(VectorOperation::add);
-    system_rhs.compress(VectorOperation::add);
+  system_matrix.compress(VectorOperation::add);
+  pressure_mass_matrix.compress(VectorOperation::add);
+  system_rhs.compress(VectorOperation::add);
 
   apply_dirichlet(solution);
 }
@@ -408,159 +407,155 @@ NSSolver::assemble_rhs(const bool initial_step)
 }
 
 void
-NSSolver::solve(const bool initial_step){
-    SolverControl solver_control(system_matrix.m(),
-                                 1e-4 * system_rhs.l2_norm(),
-                                 true);
- 
-    SolverFGMRES<TrilinosWrappers::MPI::BlockVector> gmres(solver_control);
- 
-    gmres.solve(system_matrix, newton_update, system_rhs, PreconditionIdentity());
-    pcout << "FGMRES steps: " << solver_control.last_step() << std::endl;
- 
-    apply_dirichlet(newton_update);
-}
-
-void
-NSSolver::apply_dirichlet(TrilinosWrappers::MPI::BlockVector solution_to_apply){
-
-      // Dirichlet Boundary conditions.
-    std::map<types::global_dof_index, double> boundary_values;
-
-    std::map<types::boundary_id, const Function<dim> *> boundary_functions;
-    Functions::ZeroFunction<dim>                        zero_function;
-
-    // 6 borders
-    // 7 inlet
-    // 8 outlet
-    
-    boundary_functions[7] = &inlet_velocity;
-    // boundary_functions[8] = &functionG;
-
-
-    VectorTools::interpolate_boundary_values(dof_handler,
-                                             boundary_functions,
-                                             boundary_values,
-                                             ComponentMask(
-                                               {true, true, false}));
-
-    boundary_functions.clear();
-    boundary_functions[6] = &zero_function;
-
-    VectorTools::interpolate_boundary_values(dof_handler,
-                                             boundary_functions,
-                                             boundary_values,
-                                             ComponentMask(
-                                               {true, true, false}));
-
-
-    // Check that solution vector is the right one
-    MatrixTools::apply_boundary_values(
-      boundary_values, system_matrix, solution_to_apply, system_rhs, false);
-}
-
-
-void
-NSSolver::newton_iteration(
-  const double       tolerance,
-  const unsigned int max_n_line_searches,
-  const bool         is_initial_step,
-  const bool         output_result)
+NSSolver::solve(const bool initial_step)
 {
-  bool first_step = is_initial_step;
-    double last_res = 1.0;
-    double current_res = 1.0;
-    unsigned int line_search_n = 0; 
-    while ((first_step || (current_res > tolerance)) &&
-            line_search_n < max_n_line_searches)
-      {
-        if (first_step)
+  SolverControl solver_control(1000000,
+                               1e-4 * system_rhs.l2_norm(),
+                               true);
+
+  SolverFGMRES<TrilinosWrappers::MPI::BlockVector> gmres(solver_control);
+
+  gmres.solve(system_matrix, newton_update, system_rhs, PreconditionIdentity());
+  pcout << "FGMRES steps: " << solver_control.last_step() << std::endl;
+
+  apply_dirichlet(newton_update);
+}
+
+void
+NSSolver::apply_dirichlet(TrilinosWrappers::MPI::BlockVector solution_to_apply)
+{
+  // Dirichlet Boundary conditions.
+  std::map<types::global_dof_index, double> boundary_values;
+
+  std::map<types::boundary_id, const Function<dim> *> boundary_functions;
+  Functions::ZeroFunction<dim>                        zero_function;
+
+  // 6 borders
+  // 7 inlet
+  // 8 outlet
+
+  boundary_functions[7] = &inlet_velocity;
+  // boundary_functions[8] = &functionG;
+
+
+  VectorTools::interpolate_boundary_values(dof_handler,
+                                           boundary_functions,
+                                           boundary_values,
+                                           ComponentMask({true, true, false}));
+
+  boundary_functions.clear();
+  boundary_functions[6] = &zero_function;
+
+  VectorTools::interpolate_boundary_values(dof_handler,
+                                           boundary_functions,
+                                           boundary_values,
+                                           ComponentMask({true, true, false}));
+
+
+  // Check that solution vector is the right one
+  MatrixTools::apply_boundary_values(
+    boundary_values, system_matrix, solution_to_apply, system_rhs, false);
+}
+
+
+void
+NSSolver::newton_iteration(const double       tolerance,
+                           const unsigned int max_n_line_searches,
+                           const bool         is_initial_step,
+                           const bool         output_result)
+{
+  bool         first_step    = is_initial_step;
+  double       last_res      = 1.0;
+  double       current_res   = 1.0;
+  unsigned int line_search_n = 0;
+  while ((first_step || (current_res > tolerance)) &&
+         line_search_n < max_n_line_searches)
+    {
+      if (first_step)
+        {
+          // setup_dofs();
+          setup();
+          evaluation_point = solution;
+          assemble_system(first_step);
+          solve(first_step);
+          solution = newton_update;
+          apply_dirichlet(solution);
+          first_step       = false;
+          evaluation_point = solution;
+          assemble_rhs(first_step);
+          current_res = system_rhs.l2_norm();
+          std::cout << "The residual of initial guess is " << current_res
+                    << std::endl;
+          last_res = current_res;
+        }
+      else
+        {
+          evaluation_point = solution;
+          assemble_system(first_step);
+          solve(first_step);
+
+          for (double alpha = 1.0; alpha > 1e-5; alpha *= 0.5)
+            {
+              evaluation_point = solution;
+              evaluation_point.add(alpha, newton_update);
+              apply_dirichlet(evaluation_point);
+              assemble_rhs(first_step);
+              current_res = system_rhs.l2_norm();
+              std::cout << "  alpha: " << std::setw(10) << alpha << std::setw(0)
+                        << "  residual: " << current_res << std::endl;
+              if (current_res < last_res)
+                break;
+            }
           {
-            // setup_dofs();
-            setup();
-            evaluation_point = solution;
-            assemble_system(first_step);
-            pcout << "Bro sono arrivato" << std::endl;
-            solve(first_step);
-            solution = newton_update;
-            apply_dirichlet(solution);
-            first_step       = false;
-            evaluation_point = solution;
-            assemble_rhs(first_step);
-            current_res = system_rhs.l2_norm();
-            std::cout << "The residual of initial guess is " << current_res
-                      << std::endl;
+            solution = evaluation_point;
+            std::cout << "  number of line searches: " << line_search_n
+                      << "  residual: " << current_res << std::endl;
             last_res = current_res;
           }
-        else
-          {
-            evaluation_point = solution;
-            assemble_system(first_step);
-            solve(first_step);
-
-            for (double alpha = 1.0; alpha > 1e-5; alpha *= 0.5)
-              {
-                evaluation_point = solution;
-                evaluation_point.add(alpha, newton_update);
-                apply_dirichlet(evaluation_point);
-                assemble_rhs(first_step);
-                current_res = system_rhs.l2_norm();
-                std::cout << "  alpha: " << std::setw(10) << alpha
-                          << std::setw(0) << "  residual: " << current_res
-                          << std::endl;
-                if (current_res < last_res)
-                  break;
-              }
-            {
-              solution = evaluation_point;
-              std::cout << "  number of line searches: " << line_search_n
-                        << "  residual: " << current_res << std::endl;
-              last_res = current_res;
-            }
-            ++line_search_n;
-          }
-      }
+          ++line_search_n;
+        }
+    }
 }
 
 void
 NSSolver::compute_initial_guess(double step_size)
-  {
-    const double target_Re = 1.0 / viscosity;
- 
-    bool is_initial_step = true;
- 
-    for (double Re = 1000.0; Re < target_Re;
-         Re        = std::min(Re + step_size, target_Re))
-      {
-        viscosity = 1.0 / Re;
-        std::cout << "Searching for initial guess with Re = " << Re
-                  << std::endl;
-        newton_iteration(1e-12, 50, is_initial_step, false);
-        is_initial_step = false;
-      }
-  }
+{
+  const double target_Re = 1.0 / viscosity;
+
+  bool is_initial_step = true;
+
+  for (double Re = 1000.0; Re < target_Re;
+       Re        = std::min(Re + step_size, target_Re))
+    {
+      viscosity = 1.0 / Re;
+      std::cout << "Searching for initial guess with Re = " << Re << std::endl;
+      newton_iteration(1e-12, 50, is_initial_step, false);
+      is_initial_step = false;
+    }
+}
 
 void
 NSSolver::run()
-  { 
-    const double Re = 1.0 / viscosity;
- 
-    if (Re > 1000.0)
-      {
-        std::cout << "Searching for initial guess ..." << std::endl;
-        const double step_size = 2000.0;
-        compute_initial_guess(step_size);
-        std::cout << "Found initial guess." << std::endl;
-        std::cout << "Computing solution with target Re = " << Re << std::endl;
-        viscosity = 1.0 / Re;
-        newton_iteration(1e-12, 50, false, true);
-      }
-    else
-      {
- 
-        newton_iteration(1e-12, 50, true, true);
-      }
-  }
+{
+  const double Re = 1.0 / viscosity;
+  solution = 0.0;
+  newton_update = 0.0;
+
+  if (Re > 1000.0)
+    {
+      std::cout << "Searching for initial guess ..." << std::endl;
+      const double step_size = 2000.0;
+      compute_initial_guess(step_size);
+      std::cout << "Found initial guess." << std::endl;
+      std::cout << "Computing solution with target Re = " << Re << std::endl;
+      viscosity = 1.0 / Re;
+      newton_iteration(1e-12, 50, false, true);
+    }
+  else
+    {
+      newton_iteration(1e-12, 50, true, true);
+    }
+}
 
 void
 NSSolver::output()
