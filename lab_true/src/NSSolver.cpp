@@ -402,12 +402,19 @@ void NSSolver::assemble_rhs(const bool initial_step)
 void NSSolver::solve(const bool initial_step)
 {
   SolverControl solver_control(10000000,
-                               1e-3,
+                               1e-6,
                                true);
 
   SolverGMRES<TrilinosWrappers::MPI::BlockVector> gmres(solver_control);
 
-  gmres.solve(system_matrix, newton_update, system_rhs, PreconditionIdentity());
+  PreconditionBlockTriangular preconditioner;
+  preconditioner.initialize(system_matrix.block(0, 0),
+                            pressure_mass_matrix.block(1, 1),
+                            system_matrix.block(1, 0));
+  
+  auto rhs_norm = system_rhs.l2_norm();
+  pcout << "Norm before: " << std::scientific << std::setprecision(6) << rhs_norm << std::endl;
+  gmres.solve(system_matrix, newton_update, system_rhs, preconditioner);
   pcout << "GMRES steps: " << solver_control.last_step() << std::endl;
 
   apply_dirichlet(newton_update);
@@ -460,15 +467,35 @@ void NSSolver::newton_iteration(const double tolerance,
   {
     if (first_step)
     {
-      // setup_dofs();
       setup();
       evaluation_point = solution;
       assemble_system(first_step);
       solve(first_step);
-      solution = newton_update;
+      evaluation_point = newton_update;
       apply_dirichlet(evaluation_point);
       first_step = false;
-      evaluation_point = solution;
+      solution = evaluation_point;
+
+      auto norm_sol = system_rhs.l1_norm();
+      pcout << "Pre rhs: " << norm_sol << std::endl;
+
+      std::ofstream matrixOne;
+      matrixOne.open ("matricionaUno.txt");
+      system_matrix.print(matrixOne);
+      matrixOne.close();
+
+
+      solution = 0.0;
+      assemble_system(first_step);
+
+      std::ofstream matrixTwo;
+      matrixTwo.open("matricionaDue.txt");
+      system_matrix.print(matrixTwo);
+      matrixTwo.close();
+      
+      norm_sol = system_rhs.l1_norm();
+      pcout << "Post rhs: " << norm_sol << std::endl;
+
       assemble_rhs(first_step);
       current_res = system_rhs.l2_norm();
       std::cout << "The residual of initial guess is " << current_res
@@ -477,14 +504,21 @@ void NSSolver::newton_iteration(const double tolerance,
     }
     else
     {
-      // assemble_system(first_step);
-      // solve(first_step);
-      // solution = newton_update;
-      // apply_dirichlet(solution);
-      // assemble_rhs(first_step);
-      // current_res = system_rhs.l2_norm();
+      assemble_system(first_step);
+      solve(first_step);
 
       evaluation_point = solution;
+      evaluation_point += newton_update;
+      apply_dirichlet(evaluation_point);
+      current_res = solution.l2_norm();
+      solution = evaluation_point;
+      assemble_rhs(first_step);
+      current_res = system_rhs.l2_norm();
+
+      // auto update_norm = newton_update.l2_norm();
+      // pcout << "Newton Norm: " << update_norm << std::endl;
+
+     /* evaluation_point = solution;
       assemble_system(first_step);
       solve(first_step);
 
@@ -499,9 +533,10 @@ void NSSolver::newton_iteration(const double tolerance,
                   << "  residual: " << current_res << std::endl;
         if (current_res < last_res)
           break;
-      }
+      }*/
+
       {
-        solution = evaluation_point;
+        //solution = evaluation_point;
         std::cout << "  number of line searches: " << line_search_n
                   << "  residual: " << current_res << std::endl;
         last_res = current_res;
@@ -522,7 +557,7 @@ void NSSolver::compute_initial_guess(double step_size)
   {
     viscosity = 1.0 / Re;
     std::cout << "Searching for initial guess with Re = " << Re << std::endl;
-    newton_iteration(1e-12, 50, is_initial_step, false);
+    newton_iteration(1e-12, 10, is_initial_step, false);
     is_initial_step = false;
   }
 }
@@ -541,11 +576,11 @@ void NSSolver::run()
     std::cout << "Found initial guess." << std::endl;
     std::cout << "Computing solution with target Re = " << Re << std::endl;
     viscosity = 1.0 / Re;
-    newton_iteration(1e-12, 50, false, true);
+    newton_iteration(1e-12, 10, false, true);
   }
   else
   {
-    newton_iteration(1e-12, 50, true, true);
+    newton_iteration(1e-12, 10, true, true);
   }
 }
 
