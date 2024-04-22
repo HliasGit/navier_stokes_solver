@@ -216,6 +216,9 @@ protected:
   // POut
   const double p_out = 1.0;
 
+  // Int iter
+  int iter = 0;
+
   // Inlet Velocity
   InletVelocity inlet_velocity;
 

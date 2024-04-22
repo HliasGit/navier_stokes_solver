@@ -238,6 +238,17 @@ void NSSolver::assemble(const bool initial_step, const bool assemble_matrix)
     // cell. This can be accomplished through
     // FEValues::get_function_values and FEValues::get_function_gradients.
     fe_values[velocity].get_function_values(solution, velocity_solution_loc);
+
+    if(iter<3){
+      pcout << " Solution norm: " << solution.l2_norm() << std::endl;
+      std::ofstream get_function_values_print;
+      get_function_values_print.open("get_function_values_print" + std::to_string(iter) + ".txt");
+      //std::ostream_iterator<dealii::Tensor<1,2>> output_iterator(get_function_values_print, "\n");
+      //std::copy(velocity_solution_loc.begin(), velocity_solution_loc.end(), output_iterator);
+      get_function_values.print(get_function_values_print);
+      get_function_values_print.close();
+    }
+
     fe_values[velocity].get_function_gradients(
         solution, velocity_solution_gradient_loc);
     fe_values[pressure].get_function_values(solution, pressure_solution_loc);
@@ -392,6 +403,8 @@ void NSSolver::assemble(const bool initial_step, const bool assemble_matrix)
   system_rhs.compress(VectorOperation::add);
 
   apply_dirichlet(solution);
+
+  iter++;
 }
 
 void NSSolver::assemble_system(const bool initial_step)
@@ -508,7 +521,7 @@ void NSSolver::newton_iteration(const double tolerance,
     if (first_step)
     {
       setup();
-      evaluation_point = solution;
+      //evaluation_point = solution;
       assemble_system(first_step);
       solve(first_step);
       evaluation_point = newton_update;
@@ -525,7 +538,7 @@ void NSSolver::newton_iteration(const double tolerance,
       matrixOne.close();
 
 
-      solution = 0.0;
+      //solution = 0.0;
       assemble_system(first_step);
 
       std::ofstream matrixTwo;
@@ -547,11 +560,21 @@ void NSSolver::newton_iteration(const double tolerance,
       assemble_system(first_step);
       solve(first_step);
 
-      evaluation_point = solution;
-      evaluation_point += newton_update;
-      apply_dirichlet(evaluation_point);
-      current_res = solution.l2_norm();
-      solution = evaluation_point;
+      //evaluation_point.add(100000.0);
+      //pcout << solution.has_ghost_elements() << std::endl;
+      solution.add(1.0, newton_update);
+
+      {
+        pcout << " Newton update print : " << newton_update.l2_norm() << std::endl;
+        std::ofstream get_function_values_print;
+        get_function_values_print.open("newton_values_print.txt");
+        //std::ostream_iterator<dealii::Tensor<1,2>> output_iterator(get_function_values_print, "\n");
+        //std::copy(velocity_solution_loc.begin(), velocity_solution_loc.end(), output_iterator);
+        newton_update.print(get_function_values_print);
+        get_function_values_print.close();
+      }
+
+      apply_dirichlet(solution);
       assemble_rhs(first_step);
       current_res = system_rhs.l2_norm();
 

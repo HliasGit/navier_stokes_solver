@@ -3,7 +3,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED "ON")
 
 # Set default build type to Release.
 if(NOT CMAKE_BUILD_TYPE OR "${CMAKE_BUILD_TYPE}" STREQUAL "")
-  set(CMAKE_BUILD_TYPE "Release" CACHE STRING "" FORCE)
+  set(CMAKE_BUILD_TYPE "Debug" CACHE STRING "" FORCE)
 endif()
 message(STATUS)
 message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
