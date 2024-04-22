@@ -440,17 +440,19 @@ void NSSolver::apply_dirichlet(TrilinosWrappers::MPI::BlockVector solution_to_ap
                     VectorTools::interpolate_boundary_values(
                       dof_handler,
                       boundary_id,
-                      Functions::ZeroFunction<dim>(),
-                      boundary_values);
+                      Functions::ZeroFunction<dim>(dim+1),
+                      boundary_values,
+                      ComponentMask({true, true, false}));
                     break;
                   case 7:
                     VectorTools::interpolate_boundary_values(dof_handler,
                       boundary_id,
                       inlet_velocity,
-                      boundary_values);
+                      boundary_values,
+                      ComponentMask({true, true, false}));
                     break;
-                  default:
-                    Assert(false, ExcNotImplemented());
+                  //default:
+                    //pcout << "Boundary not Dirichlet" << std::endl;        
                 }
   }
 
