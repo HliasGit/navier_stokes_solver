@@ -41,6 +41,10 @@ void NSSolver::setup_mesh()
   // processes).
   pcout << "  Number of elements = " << mesh.n_global_active_cells()
         << std::endl;
+
+  // Store boundary ids
+  boundary_ids = mesh.get_boundary_ids();
+ 
 }
 
 void NSSolver::setup_finite_element()
@@ -175,6 +179,7 @@ void NSSolver::setup_system()
   solution_owned.reinit(block_owned_dofs, MPI_COMM_WORLD);
   solution.reinit(block_owned_dofs, block_relevant_dofs, MPI_COMM_WORLD);
   newton_update.reinit(block_owned_dofs, MPI_COMM_WORLD);
+  evaluation_point.reinit(block_owned_dofs, MPI_COMM_WORLD);
 }
 
 void NSSolver::assemble(const bool initial_step, const bool assemble_matrix)
@@ -422,8 +427,41 @@ void NSSolver::solve(const bool initial_step)
 
 void NSSolver::apply_dirichlet(TrilinosWrappers::MPI::BlockVector solution_to_apply)
 {
+
   // Dirichlet Boundary conditions.
   std::map<types::global_dof_index, double> boundary_values;
+
+  boundary_values.clear();
+
+  for (const auto &boundary_id : boundary_ids){
+    switch (boundary_id)
+                {
+                  case 6:
+                    VectorTools::interpolate_boundary_values(
+                      dof_handler,
+                      boundary_id,
+                      Functions::ZeroFunction<dim>(),
+                      boundary_values);
+                    break;
+                  case 7:
+                    VectorTools::interpolate_boundary_values(dof_handler,
+                      boundary_id,
+                      inlet_velocity,
+                      boundary_values);
+                    break;
+                  default:
+                    Assert(false, ExcNotImplemented());
+                }
+  }
+
+  
+  // Check that solution vector is the right one
+  MatrixTools::apply_boundary_values(
+      boundary_values, system_matrix, solution_to_apply, system_rhs, false);
+  return;
+
+  // Dirichlet Boundary conditions.
+  //std::map<types::global_dof_index, double> boundary_values;
 
   std::map<types::boundary_id, const Function<dim> *> boundary_functions;
   Functions::ZeroFunction<dim> zero_function;

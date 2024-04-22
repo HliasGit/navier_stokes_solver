@@ -259,4 +259,7 @@ protected:
 
   // Quadrature formula for face integrals.
   std::unique_ptr<Quadrature<dim - 1>> quadrature_face;
+
+  // To store boundary ids
+  std::vector<types::boundary_id>           boundary_ids;
 };
