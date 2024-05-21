@@ -44,7 +44,6 @@ void NSSolver::setup_mesh()
 
   // Store boundary ids
   boundary_ids = mesh.get_boundary_ids();
- 
 }
 
 void NSSolver::setup_finite_element()
@@ -239,15 +238,15 @@ void NSSolver::assemble(const bool initial_step, const bool assemble_matrix)
     // FEValues::get_function_values and FEValues::get_function_gradients.
     fe_values[velocity].get_function_values(solution, velocity_solution_loc);
 
-    if(iter<3){
-      pcout << " Solution norm: " << solution.l2_norm() << std::endl;
-      std::ofstream get_function_values_print;
-      get_function_values_print.open("get_function_values_print" + std::to_string(iter) + ".txt");
-      //std::ostream_iterator<dealii::Tensor<1,2>> output_iterator(get_function_values_print, "\n");
-      //std::copy(velocity_solution_loc.begin(), velocity_solution_loc.end(), output_iterator);
-      get_function_values.print(get_function_values_print);
-      get_function_values_print.close();
-    }
+    // if(iter<3){
+    //   pcout << " Solution norm: " << solution.l2_norm() << std::endl;
+    //   std::ofstream get_function_values_print;
+    //   get_function_values_print.open("get_function_values_print" + std::to_string(iter) + ".txt");
+    //   //std::ostream_iterator<dealii::Tensor<1,2>> output_iterator(get_function_values_print, "\n");
+    //   //std::copy(velocity_solution_loc.begin(), velocity_solution_loc.end(), output_iterator);
+    //   get_function_values.print(get_function_values_print);
+    //   get_function_values_print.close();
+    // }
 
     fe_values[velocity].get_function_gradients(
         solution, velocity_solution_gradient_loc);
@@ -386,15 +385,11 @@ void NSSolver::assemble(const bool initial_step, const bool assemble_matrix)
     {
       system_matrix.add(dof_indices, cell_matrix);
       system_rhs.add(dof_indices, cell_rhs);
+      pressure_mass_matrix.add(dof_indices, cell_pressure_mass_matrix);
     }
     else
     {
       system_rhs.add(dof_indices, cell_rhs);
-    }
-
-    if (assemble_matrix)
-    {
-      pressure_mass_matrix.add(dof_indices, cell_pressure_mass_matrix);
     }
   }
 
@@ -402,7 +397,14 @@ void NSSolver::assemble(const bool initial_step, const bool assemble_matrix)
   pressure_mass_matrix.compress(VectorOperation::add);
   system_rhs.compress(VectorOperation::add);
 
-  apply_dirichlet(solution);
+  if (initial_step)
+  {
+    apply_dirichlet(solution);
+  }
+  else
+  {
+    apply_homogeneous_dirichlet(solution);
+  }
 
   iter++;
 }
@@ -420,7 +422,7 @@ void NSSolver::assemble_rhs(const bool initial_step)
 void NSSolver::solve(const bool initial_step)
 {
   SolverControl solver_control(10000000,
-                               1e-6,
+                               1e-6 * system_rhs.l2_norm(),
                                true);
 
   SolverGMRES<TrilinosWrappers::MPI::BlockVector> gmres(solver_control);
@@ -429,16 +431,16 @@ void NSSolver::solve(const bool initial_step)
   preconditioner.initialize(system_matrix.block(0, 0),
                             pressure_mass_matrix.block(1, 1),
                             system_matrix.block(1, 0));
-  
+
   auto rhs_norm = system_rhs.l2_norm();
   pcout << "Norm before: " << std::scientific << std::setprecision(6) << rhs_norm << std::endl;
   gmres.solve(system_matrix, newton_update, system_rhs, preconditioner);
   pcout << "GMRES steps: " << solver_control.last_step() << std::endl;
 
-  apply_dirichlet(newton_update);
+  // apply_dirichlet(newton_update);
 }
 
-void NSSolver::apply_dirichlet(TrilinosWrappers::MPI::BlockVector solution_to_apply)
+void NSSolver::apply_dirichlet(TrilinosWrappers::MPI::BlockVector &solution_to_apply)
 {
 
   // Dirichlet Boundary conditions.
@@ -446,37 +448,37 @@ void NSSolver::apply_dirichlet(TrilinosWrappers::MPI::BlockVector solution_to_ap
 
   boundary_values.clear();
 
-  for (const auto &boundary_id : boundary_ids){
+  for (const auto &boundary_id : boundary_ids)
+  {
     switch (boundary_id)
-                {
-                  case 6:
-                    VectorTools::interpolate_boundary_values(
-                      dof_handler,
-                      boundary_id,
-                      Functions::ZeroFunction<dim>(dim+1),
-                      boundary_values,
-                      ComponentMask({true, true, false}));
-                    break;
-                  case 7:
-                    VectorTools::interpolate_boundary_values(dof_handler,
-                      boundary_id,
-                      inlet_velocity,
-                      boundary_values,
-                      ComponentMask({true, true, false}));
-                    break;
-                  //default:
-                    //pcout << "Boundary not Dirichlet" << std::endl;        
-                }
+    {
+    case 6:
+      VectorTools::interpolate_boundary_values(
+          dof_handler,
+          boundary_id,
+          Functions::ZeroFunction<dim>(dim + 1),
+          boundary_values,
+          ComponentMask({true, true, false}));
+      break;
+    case 7:
+      VectorTools::interpolate_boundary_values(dof_handler,
+                                               boundary_id,
+                                               inlet_velocity,
+                                               boundary_values,
+                                               ComponentMask({true, true, false}));
+      break;
+      // default:
+      // pcout << "Boundary not Dirichlet" << std::endl;
+    }
   }
 
-  
   // Check that solution vector is the right one
   MatrixTools::apply_boundary_values(
       boundary_values, system_matrix, solution_to_apply, system_rhs, false);
   return;
 
   // Dirichlet Boundary conditions.
-  //std::map<types::global_dof_index, double> boundary_values;
+  // std::map<types::global_dof_index, double> boundary_values;
 
   std::map<types::boundary_id, const Function<dim> *> boundary_functions;
   Functions::ZeroFunction<dim> zero_function;
@@ -506,6 +508,30 @@ void NSSolver::apply_dirichlet(TrilinosWrappers::MPI::BlockVector solution_to_ap
       boundary_values, system_matrix, solution_to_apply, system_rhs, false);
 }
 
+void NSSolver::apply_homogeneous_dirichlet(TrilinosWrappers::MPI::BlockVector &solution_to_apply)
+{
+  // Homogeneous Dirichlet Boundary conditions.
+  std::map<types::global_dof_index, double> boundary_values;
+
+  boundary_values.clear();
+
+  for (const auto &boundary_id : boundary_ids)
+  {
+    if (boundary_id == 8)
+      continue;
+    VectorTools::interpolate_boundary_values(
+        dof_handler,
+        boundary_id,
+        Functions::ZeroFunction<dim>(dim + 1),
+        boundary_values,
+        ComponentMask({true, true, false}));
+  }
+
+  // Check that solution vector is the right one
+  MatrixTools::apply_boundary_values(
+      boundary_values, system_matrix, solution_to_apply, system_rhs, false);
+}
+
 void NSSolver::newton_iteration(const double tolerance,
                                 const unsigned int max_n_line_searches,
                                 const bool is_initial_step,
@@ -515,96 +541,101 @@ void NSSolver::newton_iteration(const double tolerance,
   double last_res = 1.0;
   double current_res = 1.0;
   unsigned int line_search_n = 0;
+
+  setup();
+
+  // apply_dirichlet(solution);
+
   while ((first_step || (current_res > tolerance)) &&
          line_search_n < max_n_line_searches)
   {
     if (first_step)
     {
-      setup();
-      //evaluation_point = solution;
+      // evaluation_point = solution;
       assemble_system(first_step);
+      // apply_dirichlet(evaluation_point);
       solve(first_step);
+      solution_owned = newton_update;
       evaluation_point = newton_update;
-      apply_dirichlet(evaluation_point);
+      // apply_dirichlet(evaluation_point);
       first_step = false;
       solution = evaluation_point;
 
       auto norm_sol = system_rhs.l1_norm();
       pcout << "Pre rhs: " << norm_sol << std::endl;
 
-      std::ofstream matrixOne;
-      matrixOne.open ("matricionaUno.txt");
-      system_matrix.print(matrixOne);
-      matrixOne.close();
-
-
-      //solution = 0.0;
+      // solution = 0.0;
       assemble_system(first_step);
+      // apply_dirichlet(evaluation_point);
 
-      std::ofstream matrixTwo;
-      matrixTwo.open("matricionaDue.txt");
-      system_matrix.print(matrixTwo);
-      matrixTwo.close();
-      
       norm_sol = system_rhs.l1_norm();
       pcout << "Post rhs: " << norm_sol << std::endl;
 
       assemble_rhs(first_step);
+      // apply_dirichlet(evaluation_point);
       current_res = system_rhs.l2_norm();
       std::cout << "The residual of initial guess is " << current_res
                 << std::endl;
       last_res = current_res;
+
+      // output result
+      output();
     }
     else
     {
       assemble_system(first_step);
+      // apply_dirichlet(evaluation_point);
       solve(first_step);
 
-      //evaluation_point.add(100000.0);
-      //pcout << solution.has_ghost_elements() << std::endl;
-      solution.add(1.0, newton_update);
+      // evaluation_point.add(100000.0);
+      // pcout << solution.has_ghost_elements() << std::endl;
+      solution_owned += newton_update;
+      solution = solution_owned;
+      // solution.add(1.0, newton_update);
 
-      {
-        pcout << " Newton update print : " << newton_update.l2_norm() << std::endl;
-        std::ofstream get_function_values_print;
-        get_function_values_print.open("newton_values_print.txt");
-        //std::ostream_iterator<dealii::Tensor<1,2>> output_iterator(get_function_values_print, "\n");
-        //std::copy(velocity_solution_loc.begin(), velocity_solution_loc.end(), output_iterator);
-        newton_update.print(get_function_values_print);
-        get_function_values_print.close();
-      }
+      // {
+      //   pcout << " Newton update print : " << newton_update.l2_norm() << std::endl;
+      //   std::ofstream get_function_values_print;
+      //   get_function_values_print.open("newton_values_print.txt");
+      //   // std::ostream_iterator<dealii::Tensor<1,2>> output_iterator(get_function_values_print, "\n");
+      //   // std::copy(velocity_solution_loc.begin(), velocity_solution_loc.end(), output_iterator);
+      //   newton_update.print(get_function_values_print);
+      //   get_function_values_print.close();
+      // }
 
-      apply_dirichlet(solution);
+      // apply_dirichlet(solution);
       assemble_rhs(first_step);
       current_res = system_rhs.l2_norm();
+      // apply_dirichlet(solution);
 
       // auto update_norm = newton_update.l2_norm();
       // pcout << "Newton Norm: " << update_norm << std::endl;
 
-     /* evaluation_point = solution;
-      assemble_system(first_step);
-      solve(first_step);
+      /* evaluation_point = solution;
+       assemble_system(first_step);
+       solve(first_step);
 
-      for (double alpha = 1.0; alpha > 1e-5; alpha *= 0.5)
-      {
-        evaluation_point = solution;
-        evaluation_point.add(alpha, newton_update);
-        apply_dirichlet(evaluation_point);
-        assemble_rhs(first_step);
-        current_res = system_rhs.l2_norm();
-        std::cout << "  alpha: " << std::setw(10) << alpha << std::setw(0)
-                  << "  residual: " << current_res << std::endl;
-        if (current_res < last_res)
-          break;
-      }*/
+       for (double alpha = 1.0; alpha > 1e-5; alpha *= 0.5)
+       {
+         evaluation_point = solution;
+         evaluation_point.add(alpha, newton_update);
+         apply_dirichlet(evaluation_point);
+         assemble_rhs(first_step);
+         current_res = system_rhs.l2_norm();
+         std::cout << "  alpha: " << std::setw(10) << alpha << std::setw(0)
+                   << "  residual: " << current_res << std::endl;
+         if (current_res < last_res)
+           break;
+       }*/
 
       {
-        //solution = evaluation_point;
+        // solution = evaluation_point;
         std::cout << "  number of line searches: " << line_search_n
                   << "  residual: " << current_res << std::endl;
         last_res = current_res;
       }
       ++line_search_n;
+      output();
     }
   }
 }

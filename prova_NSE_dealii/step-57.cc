@@ -193,7 +193,7 @@ namespace Step57
  
   template <int dim>
   StationaryNavierStokes<dim>::StationaryNavierStokes(const unsigned int degree)
-    : viscosity(1.0 / 7500.0)
+    : viscosity(1.0 / 1000.0)
     , gamma(1.0)
     , degree(degree)
     , triangulation(Triangulation<dim>::maximum_smoothing)

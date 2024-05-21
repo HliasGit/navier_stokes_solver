@@ -67,14 +67,18 @@ public:
     virtual void
     vector_value(const Point<dim> &p, Vector<double> &values) const override
     {
-      for (unsigned int i = 0; i < dim + 1; ++i)
-        values[i] = 1.0;
+      values[0] = 1.0;
+      for (unsigned int i = 1; i < dim + 1; ++i)
+        values[i] = 0.0;
     }
 
     virtual double
     value(const Point<dim> &p, const unsigned int component = 0) const override
     {
-      return 1.0;
+      if (component == 0)
+        return 1.0;
+      else
+        return 0.0;
     }
   };
 
@@ -102,7 +106,7 @@ public:
     vmult(TrilinosWrappers::MPI::BlockVector       &dst,
           const TrilinosWrappers::MPI::BlockVector &src) const
     {
-      SolverControl                           solver_control_velocity(100000,
+      SolverControl                           solver_control_velocity(10000000,
                                             1e-2 * src.block(0).l2_norm());
       SolverCG<TrilinosWrappers::MPI::Vector> solver_cg_velocity(
         solver_control_velocity);
@@ -115,7 +119,7 @@ public:
       B->vmult(tmp, dst.block(0));
       tmp.sadd(-1.0, src.block(1));
 
-      SolverControl                           solver_control_pressure(100000,
+      SolverControl                           solver_control_pressure(10000000,
                                             1e-2 * src.block(1).l2_norm());
       SolverCG<TrilinosWrappers::MPI::Vector> solver_cg_pressure(
         solver_control_pressure);
@@ -192,7 +196,10 @@ protected:
   solve(const bool);
 
   void
-  apply_dirichlet(TrilinosWrappers::MPI::BlockVector);
+  apply_dirichlet(TrilinosWrappers::MPI::BlockVector&);
+  
+  void
+  apply_homogeneous_dirichlet(TrilinosWrappers::MPI::BlockVector&);
 
   void
   newton_iteration(const double, const unsigned int, const bool, const bool);
