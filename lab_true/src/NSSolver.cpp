@@ -436,8 +436,6 @@ void NSSolver::solve(const bool initial_step)
   pcout << "Norm before: " << std::scientific << std::setprecision(6) << rhs_norm << std::endl;
   gmres.solve(system_matrix, newton_update, system_rhs, preconditioner);
   pcout << "GMRES steps: " << solver_control.last_step() << std::endl;
-
-  // apply_dirichlet(newton_update);
 }
 
 void NSSolver::apply_dirichlet(TrilinosWrappers::MPI::BlockVector &solution_to_apply)
@@ -544,98 +542,50 @@ void NSSolver::newton_iteration(const double tolerance,
 
   setup();
 
-  // apply_dirichlet(solution);
-
   while ((first_step || (current_res > tolerance)) &&
          line_search_n < max_n_line_searches)
   {
     if (first_step)
     {
-      // evaluation_point = solution;
       assemble_system(first_step);
-      // apply_dirichlet(evaluation_point);
+
+      // Solve the system
       solve(first_step);
-      solution_owned = newton_update;
-      evaluation_point = newton_update;
-      // apply_dirichlet(evaluation_point);
+
       first_step = false;
       solution = evaluation_point;
 
-      auto norm_sol = system_rhs.l1_norm();
-      pcout << "Pre rhs: " << norm_sol << std::endl;
-
-      // solution = 0.0;
-      assemble_system(first_step);
-      // apply_dirichlet(evaluation_point);
-
-      norm_sol = system_rhs.l1_norm();
-      pcout << "Post rhs: " << norm_sol << std::endl;
-
+      // Find new residual
       assemble_rhs(first_step);
-      // apply_dirichlet(evaluation_point);
       current_res = system_rhs.l2_norm();
+
       std::cout << "The residual of initial guess is " << current_res
                 << std::endl;
       last_res = current_res;
-
-      // output result
-      output();
     }
     else
     {
       assemble_system(first_step);
-      // apply_dirichlet(evaluation_point);
+      
+      // Solve the system
       solve(first_step);
 
-      // evaluation_point.add(100000.0);
-      // pcout << solution.has_ghost_elements() << std::endl;
+      solution_owned = solution;
       solution_owned += newton_update;
+
       solution = solution_owned;
-      // solution.add(1.0, newton_update);
-
-      // {
-      //   pcout << " Newton update print : " << newton_update.l2_norm() << std::endl;
-      //   std::ofstream get_function_values_print;
-      //   get_function_values_print.open("newton_values_print.txt");
-      //   // std::ostream_iterator<dealii::Tensor<1,2>> output_iterator(get_function_values_print, "\n");
-      //   // std::copy(velocity_solution_loc.begin(), velocity_solution_loc.end(), output_iterator);
-      //   newton_update.print(get_function_values_print);
-      //   get_function_values_print.close();
-      // }
-
-      // apply_dirichlet(solution);
+      
+      // Calculate new residual
       assemble_rhs(first_step);
       current_res = system_rhs.l2_norm();
-      // apply_dirichlet(solution);
-
-      // auto update_norm = newton_update.l2_norm();
-      // pcout << "Newton Norm: " << update_norm << std::endl;
-
-      /* evaluation_point = solution;
-       assemble_system(first_step);
-       solve(first_step);
-
-       for (double alpha = 1.0; alpha > 1e-5; alpha *= 0.5)
-       {
-         evaluation_point = solution;
-         evaluation_point.add(alpha, newton_update);
-         apply_dirichlet(evaluation_point);
-         assemble_rhs(first_step);
-         current_res = system_rhs.l2_norm();
-         std::cout << "  alpha: " << std::setw(10) << alpha << std::setw(0)
-                   << "  residual: " << current_res << std::endl;
-         if (current_res < last_res)
-           break;
-       }*/
 
       {
-        // solution = evaluation_point;
-        std::cout << "  number of line searches: " << line_search_n
+        pcout << "  number of line searches: " << line_search_n
                   << "  residual: " << current_res << std::endl;
         last_res = current_res;
       }
+
       ++line_search_n;
-      output();
     }
   }
 }
@@ -651,7 +601,7 @@ void NSSolver::compute_initial_guess(double step_size)
   {
     viscosity = 1.0 / Re;
     std::cout << "Searching for initial guess with Re = " << Re << std::endl;
-    newton_iteration(1e-12, 10, is_initial_step, false);
+    newton_iteration(1e-6, 10, is_initial_step, false);
     is_initial_step = false;
   }
 }
@@ -670,11 +620,11 @@ void NSSolver::run()
     std::cout << "Found initial guess." << std::endl;
     std::cout << "Computing solution with target Re = " << Re << std::endl;
     viscosity = 1.0 / Re;
-    newton_iteration(1e-12, 10, false, true);
+    newton_iteration(1e-6, 10, false, true);
   }
   else
   {
-    newton_iteration(1e-12, 10, true, true);
+    newton_iteration(1e-6, 10, true, true);
   }
 }
 
