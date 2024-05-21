@@ -313,6 +313,9 @@ protected:
 
   // System solution (including ghost elements).
   TrilinosWrappers::MPI::BlockVector solution;
+
+  // Evaluation point, used to find an optimal update in the Newton iteration
+  TrilinosWrappers::MPI::BlockVector evaluation_point;
 };
 
 #endif

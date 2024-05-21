@@ -423,12 +423,26 @@ NSSolver::solve_newton()
 
       // We actually solve the system only if the residual is larger than the
       // tolerance.
-      if (residual_norm > residual_tolerance && residual_norm < prev_residual)
+      if (residual_norm > residual_tolerance)
         {
           solve_system();
 
-          solution_owned += delta_owned;
-          solution = solution_owned;
+          evaluation_point = solution;
+
+          // Update the solution
+          for(double alpha = 1; alpha > 1e-12; alpha *= 0.1) {
+            solution_owned = evaluation_point;
+            solution_owned.add(alpha, delta_owned);
+            solution = solution_owned;
+
+            assemble_system(false);
+            residual_norm = residual_vector.l2_norm();
+
+            pcout << "  Evaluating alpha=" << alpha << ", ||r||=" << residual_norm << std::endl;
+
+            if (residual_norm < prev_residual)
+              break;
+          }
 
           prev_residual = residual_norm;
         }
