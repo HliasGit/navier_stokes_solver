@@ -1,5 +1,5 @@
-#ifndef NSSOLVER_HPP
-#define NSSOLVER_HPP
+#ifndef NSSOLVERSTATIONARY_HPP
+#define NSSOLVERSTATIONARY_HPP
 
 #include <deal.II/base/conditional_ostream.h>
 #include <deal.II/base/quadrature_lib.h>
@@ -35,7 +35,7 @@
 using namespace dealii;
 
 // Class representing the non-linear diffusion problem.
-class NSSolver
+class NSSolverStationary
 {
 public:
   // Physical dimension (1D, 2D, 3D)
@@ -60,7 +60,7 @@ public:
                  Vector<double> &values) const override
     {
       // values[0] = std::sin(get_time() * 2.0 * numbers::PI);
-      values[0] = 0.0;
+      values[0] = 1.0;
       for (unsigned int i = 1; i < dim + 1; ++i)
         values[i] = 0.0;
     }
@@ -70,7 +70,7 @@ public:
           const unsigned int component = 0) const override
     {
       if (component == 0)
-        return 0.0;
+        return 1.0;
       // return std::sin(get_time() * 2.0 * numbers::PI);
       else
         return 0.0;
@@ -78,49 +78,6 @@ public:
 
   protected:
     const double alpha = 1.0;
-  };
-
-  // Function for the forcing term.
-  class ForcingTerm : public Function<dim>
-  {
-  public:
-    ForcingTerm()
-        : Function<dim>(dim + 1)
-    {
-    }
-
-    virtual void
-    vector_value(const Point<dim> & /*p*/,
-                 Vector<double> &values) const override
-    {
-      for (unsigned int i = 0; i < dim - 1; ++i)
-        values[i] = 0.0;
-
-      values[0] = std::sin(get_time() * 2.0 * numbers::PI);
-    }
-
-    virtual double
-    value(const Point<dim> & /*p*/,
-          const unsigned int component = 0) const override
-    {
-      if (component == 0)
-        // return 0.0;
-        return std::sin(get_time() * 2.0 * numbers::PI);
-      else
-        return 0.0;
-    }
-  };
-
-  // Function for initial conditions.
-  class FunctionU0 : public Function<dim>
-  {
-  public:
-    virtual double
-    value(const Point<dim> & /*p*/,
-          const unsigned int /*component*/ = 0) const override
-    {
-      return 0.0;
-    }
   };
 
   // Preconditioner
@@ -247,12 +204,10 @@ public:
   };
 
   // Constructor.
-  NSSolver(const std::string &mesh_file_name_,
+  NSSolverStationary(const std::string &mesh_file_name_,
            const unsigned int &degree_velocity_,
-           const unsigned int &degree_pressure_,
-           const double &T_,
-           const double &delta_t_)
-      : mpi_size(Utilities::MPI::n_mpi_processes(MPI_COMM_WORLD)), mpi_rank(Utilities::MPI::this_mpi_process(MPI_COMM_WORLD)), pcout(std::cout, mpi_rank == 0), mesh_file_name(mesh_file_name_), mesh(MPI_COMM_WORLD), degree_velocity(degree_velocity_), degree_pressure(degree_pressure_), T(T_), delta_t(delta_t_)
+           const unsigned int &degree_pressure_)
+      : mpi_size(Utilities::MPI::n_mpi_processes(MPI_COMM_WORLD)), mpi_rank(Utilities::MPI::this_mpi_process(MPI_COMM_WORLD)), pcout(std::cout, mpi_rank == 0), mesh_file_name(mesh_file_name_), mesh(MPI_COMM_WORLD), degree_velocity(degree_velocity_), degree_pressure(degree_pressure_)
   {
   }
 
@@ -266,10 +221,7 @@ public:
 
   // Output.
   void
-  output(const unsigned int &time_step) const;
-
-  void
-  solve();
+  output() const;
 
 protected:
   // Assemble the tangent problem.
@@ -294,23 +246,16 @@ protected:
   // Problem definition. ///////////////////////////////////////////////////////
 
   // Kinematic viscosity [m2/s]
-  const double nu = 10.0;
+  const double nu = 1.0;
 
   // Inlet velocity
   InletVelocity inlet_velocity;
 
-  // Initial conditions
-  FunctionU0 u_0;
-
   // Pressure out [Pa]
   const double p_out = 10.0;
 
-  // Forcing term
-  ForcingTerm forcing_term;
-
   // Lagrangian
   // const double gamma = 1.0;
-
   // Discretization. ///////////////////////////////////////////////////////////
 
   // Mesh file name.
@@ -318,19 +263,11 @@ protected:
 
   // Mesh.
   parallel::fullydistributed::Triangulation<dim> mesh;
-
+  
   // Polynomial degrees.
   const unsigned int degree_velocity;
   const unsigned int degree_pressure;
 
-  // current time
-  double time;
-
-  // final time
-  double T;
-
-  // Time step.
-  const double delta_t;
 
   // Finite element space.
   std::unique_ptr<FiniteElement<dim>> fe;
@@ -374,9 +311,6 @@ protected:
 
   // System solution (including ghost elements).
   TrilinosWrappers::MPI::BlockVector solution;
-
-  // store the solution at the previous iteration
-  TrilinosWrappers::MPI::BlockVector solution_old;
 
   // Evaluation point, used to find an optimal update in the Newton iteration
   TrilinosWrappers::MPI::BlockVector evaluation_point;

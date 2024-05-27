@@ -1,6 +1,6 @@
-#include "NSSolver.hpp"
+#include "NSSolverStationary.hpp"
 
-void NSSolver::setup()
+void NSSolverStationary::setup()
 {
   // Create the mesh.
   {
@@ -163,11 +163,10 @@ void NSSolver::setup()
     delta_owned.reinit(block_owned_dofs, MPI_COMM_WORLD);
 
     solution.reinit(block_owned_dofs, block_relevant_dofs, MPI_COMM_WORLD);
-    solution_old = solution;
   }
 }
 
-void NSSolver::assemble_system(bool first_iter)
+void NSSolverStationary::assemble_system(bool first_iter)
 {
   const unsigned int dofs_per_cell = fe->dofs_per_cell;
   const unsigned int n_q = quadrature->size();
@@ -199,9 +198,7 @@ void NSSolver::assemble_system(bool first_iter)
   // We use these vectors to store the old solution (i.e. at previous Newton
   // iteration) and its gradient on quadrature nodes of the current cell.
   std::vector<Tensor<1, dim>> velocity_loc(n_q);
-  std::vector<Tensor<1, dim>> velocity_old_loc(n_q);
   std::vector<Tensor<2, dim>> velocity_gradient_loc(n_q);
-  Tensor<1, dim> forcing_term_tensor;
   std::vector<double> pressure_loc(n_q);
 
   for (const auto &cell : dof_handler.active_cell_iterators())
@@ -224,20 +221,9 @@ void NSSolver::assemble_system(bool first_iter)
     fe_values[velocity].get_function_gradients(solution,
                                                velocity_gradient_loc);
     fe_values[pressure].get_function_values(solution, pressure_loc);
-    fe_values[velocity].get_function_values(solution_old, velocity_old_loc);
 
     for (unsigned int q = 0; q < n_q; ++q)
     {
-      if (first_iter)
-      {
-        // We also need to compute the value of the forcing term on the quadrature
-        Vector<double> forcing_term_loc(dim);
-        forcing_term.vector_value(fe_values.quadrature_point(q),
-                                  forcing_term_loc);
-        for (unsigned int d = 0; d < dim; ++d)
-          forcing_term_tensor[d] = forcing_term_loc[d];
-      }
-
       for (unsigned int i = 0; i < dofs_per_cell; ++i)
       {
         for (unsigned int j = 0; j < dofs_per_cell; ++j)
@@ -254,11 +240,6 @@ void NSSolver::assemble_system(bool first_iter)
             // Pressure term in the momentum equation.
             cell_matrix(i, j) -= fe_values[velocity].divergence(i, q) *
                                  fe_values[pressure].value(j, q) *
-                                 fe_values.JxW(q);
-
-            // time dependent term
-            cell_matrix(i, j) += (velocity_loc[q] - velocity_old_loc[q]) *
-                                 fe_values[velocity].value(i, q) / delta_t *
                                  fe_values.JxW(q);
 
             // Pressure term in the continuity equation.
@@ -284,11 +265,6 @@ void NSSolver::assemble_system(bool first_iter)
             cell_matrix(i, j) +=
                 velocity_loc[q] * fe_values[velocity].gradient(j, q) *
                 fe_values[velocity].value(i, q) * fe_values.JxW(q);
-
-            // time dependent term
-            cell_matrix(i, j) += (velocity_loc[q] - velocity_old_loc[q]) *
-                                 fe_values[velocity].value(i, q) / delta_t *
-                                 fe_values.JxW(q);
 
             // Third term - viscosity
             cell_matrix(i, j) +=
@@ -346,10 +322,10 @@ void NSSolver::assemble_system(bool first_iter)
                        fe_values[pressure].value(i, q) * fe_values.JxW(q);
 
         // TODO Forcing term
-        // Forcing term.
-        cell_rhs(i) += scalar_product(forcing_term_tensor,
-                                      fe_values[velocity].value(i, q)) *
-                       fe_values.JxW(q);
+        //   cell_rhs(i) += scalar_product(forcing_term_tensor,
+        //                                 fe_values[velocity].value(i,
+        //                                 q)) *
+        //                  fe_values.JxW(q);
 
         // Augmented Lagrangian
         // cell_rhs(i) -= gamma * velocity_divergence_loc *
@@ -435,7 +411,7 @@ void NSSolver::assemble_system(bool first_iter)
   }
 }
 
-void NSSolver::solve_system()
+void NSSolverStationary::solve_system()
 {
   SolverControl solver_control(100000, 1e-8 * residual_vector.l2_norm());
 
@@ -451,7 +427,7 @@ void NSSolver::solve_system()
         << std::endl;
 }
 
-void NSSolver::solve_newton()
+void NSSolverStationary::solve_newton()
 {
   pcout << "===============================================" << std::endl;
 
@@ -511,7 +487,7 @@ void NSSolver::solve_newton()
   pcout << "===============================================" << std::endl;
 }
 
-void NSSolver::output(const unsigned int &time_step) const
+void NSSolverStationary::output() const
 {
   pcout << "===============================================" << std::endl;
 
@@ -540,52 +516,10 @@ void NSSolver::output(const unsigned int &time_step) const
 
   const std::string output_file_name = "output-stokes";
   data_out.write_vtu_with_pvtu_record("./",
-                                      "output",
-                                      time_step,
-                                      MPI_COMM_WORLD,
-                                      3);
+                                      output_file_name,
+                                      0,
+                                      MPI_COMM_WORLD);
 
   pcout << "Output written to " << output_file_name << std::endl;
   pcout << "===============================================" << std::endl;
-}
-
-void NSSolver::solve()
-{
-  pcout << "===============================================" << std::endl;
-
-  time = 0.0;
-
-  // Apply the initial condition.
-  {
-    pcout << "Applying the initial condition" << std::endl;
-
-    // VectorTools::interpolate(dof_handler, u_0, solution_owned);
-    // solution = solution_owned;
-
-    // Output the initial solution.
-    output(0);
-    pcout << "-----------------------------------------------" << std::endl;
-  }
-
-  unsigned int time_step = 0;
-
-  while (time < T - 0.5 * delta_t)
-  {
-    time += delta_t;
-    ++time_step;
-
-    // Store the old solution, so that it is available for assembly.
-    solution_old = solution;
-
-    pcout << "n = " << std::setw(3) << time_step << ", t = " << std::setw(5)
-          << std::fixed << time << std::endl;
-
-    // At every time step, we invoke Newton's method to solve the non-linear
-    // problem.
-    solve_newton();
-
-    output(time_step);
-
-    pcout << std::endl;
-  }
 }

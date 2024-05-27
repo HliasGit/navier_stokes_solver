@@ -1,4 +1,4 @@
-#include "NSSolver.hpp"
+#include "NSSolverStationary.hpp"
 
 // Main function.
 int
@@ -10,10 +10,11 @@ main(int argc, char *argv[])
   const unsigned int degree_velocity = 2;
   const unsigned int degree_pressure = 1;
 
-  NSSolver problem(mesh_file_name, degree_velocity, degree_pressure, 1.0, 0.2);
+  NSSolverStationary problem(mesh_file_name, degree_velocity, degree_pressure);
 
   problem.setup();
-  problem.solve();
+  problem.solve_newton();
+  problem.output();
 
   return 0;
 }
