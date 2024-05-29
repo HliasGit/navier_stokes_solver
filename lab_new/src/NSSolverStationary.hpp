@@ -246,7 +246,7 @@ protected:
   // Problem definition. ///////////////////////////////////////////////////////
 
   // Kinematic viscosity [m2/s]
-  const double nu = 1.0;
+  double nu = 1.0;
 
   // Inlet velocity
   InletVelocity inlet_velocity;
