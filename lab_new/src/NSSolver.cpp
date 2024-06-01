@@ -444,7 +444,7 @@ void NSSolver::assemble_system(bool first_iter)
 
 void NSSolver::solve_system()
 {
-  SolverControl solver_control(100000, 1e-12 * residual_vector.l2_norm());
+  SolverControl solver_control(100000, 1e-12);
 
   SolverFGMRES<TrilinosWrappers::MPI::BlockVector> solver(solver_control);
 
@@ -464,55 +464,72 @@ void NSSolver::solve_newton()
 
   const unsigned int n_max_iters = 1000;
   const double residual_tolerance = 1e-8;
+  double target_Re = 1.0 / nu;
+  bool first_iter = true;
 
-  unsigned int n_iter = 0;
-  double residual_norm = residual_tolerance + 1;
-  double prev_residual;
-
-  while (n_iter < n_max_iters && residual_norm > residual_tolerance)
+  for (double Re = 50.0; Re <= target_Re; Re += 10.0)
   {
-    assemble_system(n_iter == 0 ? true : false);
-    residual_norm = residual_vector.l2_norm();
+    pcout << "===============================================" << std::endl;
+    pcout << "Solving for Re = " << Re << std::endl;
+    nu = 1.0 / Re;
 
-    prev_residual = n_iter == 0 ? residual_norm + 1 : prev_residual;
+    unsigned int n_iter = 0;
+    double residual_norm = residual_tolerance + 1;
+    double prev_residual;
 
-    pcout << "Newton iteration " << n_iter << "/" << n_max_iters
-          << " - ||r|| = " << std::scientific << std::setprecision(6)
-          << residual_norm << std::flush;
-
-    // We actually solve the system only if the residual is larger than the
-    // tolerance.
-    if (residual_norm > residual_tolerance)
+    while (n_iter < n_max_iters && residual_norm > residual_tolerance)
     {
-      solve_system();
-
-      evaluation_point = solution;
-
-      // Update the solution
-      for (double alpha = 1; alpha > 1e-12; alpha *= 0.1)
+      if (first_iter)
       {
-        solution_owned = evaluation_point;
-        solution_owned.add(alpha, delta_owned);
-        solution = solution_owned;
-
+        first_iter = false;
+        assemble_system(n_iter == 0 ? true : false);
+      }
+      else
+      {
         assemble_system(false);
-        residual_norm = residual_vector.l2_norm();
-
-        pcout << "  Evaluating alpha=" << alpha << ", ||r||=" << residual_norm << std::endl;
-
-        if (residual_norm < prev_residual)
-          break;
       }
 
-      prev_residual = residual_norm;
-    }
-    else
-    {
-      pcout << " < tolerance" << std::endl;
-      break;
-    }
+      residual_norm = residual_vector.l2_norm();
 
-    ++n_iter;
+      prev_residual = n_iter == 0 ? residual_norm + 1 : prev_residual;
+
+      pcout << "Newton iteration " << n_iter << "/" << n_max_iters
+            << " - ||r|| = " << std::scientific << std::setprecision(6)
+            << residual_norm << std::flush;
+
+      // We actually solve the system only if the residual is larger than the
+      // tolerance.
+      if (residual_norm > residual_tolerance)
+      {
+        solve_system();
+
+        evaluation_point = solution;
+
+        // Update the solution
+        for (double alpha = 1; alpha > 1e-12; alpha *= 0.1)
+        {
+          solution_owned = evaluation_point;
+          solution_owned.add(alpha, delta_owned);
+          solution = solution_owned;
+
+          assemble_system(false);
+          residual_norm = residual_vector.l2_norm();
+
+          pcout << "  Evaluating alpha=" << alpha << ", ||r||=" << residual_norm << std::endl;
+
+          if (residual_norm < prev_residual)
+            break;
+        }
+
+        prev_residual = residual_norm;
+      }
+      else
+      {
+        pcout << " < tolerance" << std::endl;
+        break;
+      }
+      ++n_iter;
+    }
   }
 
   pcout << "===============================================" << std::endl;
