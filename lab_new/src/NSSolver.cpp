@@ -256,7 +256,7 @@ void NSSolver::assemble_system(bool first_iter)
                                  fe_values[pressure].value(j, q) *
                                  fe_values.JxW(q);
 
-            // time dependent term
+            // time dependent term (mass matrix)
             cell_matrix(i, j) += (velocity_loc[q] - velocity_old_loc[q]) *
                                  fe_values[velocity].value(i, q) / delta_t *
                                  fe_values.JxW(q);
@@ -285,8 +285,8 @@ void NSSolver::assemble_system(bool first_iter)
                 velocity_loc[q] * fe_values[velocity].gradient(j, q) *
                 fe_values[velocity].value(i, q) * fe_values.JxW(q);
 
-            // time dependent term
-            cell_matrix(i, j) += (velocity_loc[q] - velocity_old_loc[q]) *
+            // time dependent term delta_h * v_h / delta_t 
+            cell_matrix(i, j) += fe_values[velocity].value(j, q) *
                                  fe_values[velocity].value(i, q) / delta_t *
                                  fe_values.JxW(q);
 
@@ -325,15 +325,22 @@ void NSSolver::assemble_system(bool first_iter)
         }
 
         //-R(u,v)
+        // time dependent term
+        cell_rhs(i) -= (velocity_loc[q] - velocity_old_loc[q]) *
+                    fe_values[velocity].value(i, q) / delta_t *
+                    fe_values.JxW(q);
+
         // a(u,v)
         cell_rhs(i) -=
             nu *
             scalar_product(velocity_gradient_loc[q],
                            fe_values[velocity].gradient(i, q)) *
             fe_values.JxW(q);
+
         // c(u;u,v)
         cell_rhs(i) -= velocity_loc[q] * velocity_gradient_loc[q] *
                        fe_values[velocity].value(i, q) * fe_values.JxW(q);
+        
         // b(v,p)
         cell_rhs(i) += pressure_loc[q] *
                        fe_values[velocity].divergence(i, q) *
@@ -347,9 +354,9 @@ void NSSolver::assemble_system(bool first_iter)
 
         // TODO Forcing term
         // Forcing term.
-        cell_rhs(i) += scalar_product(forcing_term_tensor,
-                                      fe_values[velocity].value(i, q)) *
-                       fe_values.JxW(q);
+        // cell_rhs(i) += scalar_product(forcing_term_tensor,
+        //                               fe_values[velocity].value(i, q)) *
+        //                fe_values.JxW(q);
 
         // Augmented Lagrangian
         // cell_rhs(i) -= gamma * velocity_divergence_loc *
@@ -437,9 +444,9 @@ void NSSolver::assemble_system(bool first_iter)
 
 void NSSolver::solve_system()
 {
-  SolverControl solver_control(100000, 1e-8 * residual_vector.l2_norm());
+  SolverControl solver_control(100000, 1e-12 * residual_vector.l2_norm());
 
-  SolverGMRES<TrilinosWrappers::MPI::BlockVector> solver(solver_control);
+  SolverFGMRES<TrilinosWrappers::MPI::BlockVector> solver(solver_control);
 
   PreconditionBlockTriangular preconditioner;
   preconditioner.initialize(jacobian_matrix.block(0, 0),
@@ -456,7 +463,7 @@ void NSSolver::solve_newton()
   pcout << "===============================================" << std::endl;
 
   const unsigned int n_max_iters = 1000;
-  const double residual_tolerance = 1e-6;
+  const double residual_tolerance = 1e-8;
 
   unsigned int n_iter = 0;
   double residual_norm = residual_tolerance + 1;

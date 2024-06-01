@@ -413,14 +413,18 @@ void NSSolverStationary::assemble_system(bool first_iter)
 
 void NSSolverStationary::solve_system()
 {
-  SolverControl solver_control(100000, 1e-12);
+  SolverControl solver_control(100000, 1e-14);
 
-  SolverGMRES<TrilinosWrappers::MPI::BlockVector> solver(solver_control);
+  SolverFGMRES<TrilinosWrappers::MPI::BlockVector> solver(solver_control);
 
   PreconditionBlockTriangular preconditioner;
   preconditioner.initialize(jacobian_matrix.block(0, 0),
                             pressure_mass.block(1, 1),
                             jacobian_matrix.block(1, 0));
+
+  // PreconditionBlockDiagonal preconditioner;
+  // preconditioner.initialize(jacobian_matrix.block(0, 0),
+  //                           pressure_mass.block(1, 1));
 
   solver.solve(jacobian_matrix, delta_owned, residual_vector, preconditioner);
   pcout << "   " << solver_control.last_step() << " GMRES iterations"
@@ -433,8 +437,14 @@ void NSSolverStationary::solve_newton()
 
   const unsigned int n_max_iters = 1000;
   const double residual_tolerance = 1e-8;
+  double target_Re = 1.0 / nu;
+  bool first_iter = true;
 
-  for(nu = 1.0; nu >= 0.5; nu -= 0.25) {
+  for (double Re = 100.0; Re <= target_Re; Re += 10.0)
+  {
+    pcout << "===============================================" << std::endl;
+    pcout << "Solving for Re = " << Re << std::endl;
+    nu = 1.0 / Re;
 
     unsigned int n_iter = 0;
     double residual_norm = residual_tolerance + 1;
@@ -442,11 +452,16 @@ void NSSolverStationary::solve_newton()
 
     while (n_iter < n_max_iters && residual_norm > residual_tolerance)
     {
-      if(nu == 1.0){
+      if (first_iter)
+      {
+        first_iter = false;
         assemble_system(n_iter == 0 ? true : false);
-      } else{
+      }
+      else
+      {
         assemble_system(false);
       }
+
       residual_norm = residual_vector.l2_norm();
 
       prev_residual = n_iter == 0 ? residual_norm + 1 : prev_residual;
@@ -484,12 +499,12 @@ void NSSolverStationary::solve_newton()
       else
       {
         pcout << " < tolerance" << std::endl;
+        output();
         break;
       }
-
+      output();
       ++n_iter;
     }
-
   }
 
   pcout << "===============================================" << std::endl;

@@ -59,8 +59,8 @@ public:
     vector_value(const Point<dim> & /*p*/,
                  Vector<double> &values) const override
     {
-      // values[0] = std::sin(get_time() * 2.0 * numbers::PI);
-      values[0] = 0.0;
+      values[0] = 0.01 * std::sin(get_time() * 2.0 * numbers::PI);
+      // values[0] = 0.1;
       for (unsigned int i = 1; i < dim + 1; ++i)
         values[i] = 0.0;
     }
@@ -70,8 +70,8 @@ public:
           const unsigned int component = 0) const override
     {
       if (component == 0)
-        return 0.0;
-      // return std::sin(get_time() * 2.0 * numbers::PI);
+        // return 0.1;
+        return 0.01 * std::sin(get_time() * 2.0 * numbers::PI);
       else
         return 0.0;
     }
@@ -96,7 +96,8 @@ public:
       for (unsigned int i = 0; i < dim - 1; ++i)
         values[i] = 0.0;
 
-      values[0] = std::sin(get_time() * 2.0 * numbers::PI);
+      // values[0] = std::sin(get_time() * 2.0 * numbers::PI);
+      values[0] = 0.0;
     }
 
     virtual double
@@ -104,8 +105,8 @@ public:
           const unsigned int component = 0) const override
     {
       if (component == 0)
-        // return 0.0;
-        return std::sin(get_time() * 2.0 * numbers::PI);
+        return 0.0;
+      // return std::sin(get_time() * 2.0 * numbers::PI);
       else
         return 0.0;
     }
@@ -203,8 +204,8 @@ public:
     vmult(TrilinosWrappers::MPI::BlockVector &dst,
           const TrilinosWrappers::MPI::BlockVector &src) const
     {
-      SolverControl solver_control_velocity(10000000,
-                                            1e-2 * src.block(0).l2_norm());
+      SolverControl solver_control_velocity(100001,
+                                            1e-1 * src.block(0).l2_norm());
       SolverCG<TrilinosWrappers::MPI::Vector> solver_cg_velocity(
           solver_control_velocity);
       solver_cg_velocity.solve(*velocity_stiffness,
@@ -216,8 +217,8 @@ public:
       B->vmult(tmp, dst.block(0));
       tmp.sadd(-1.0, src.block(1));
 
-      SolverControl solver_control_pressure(10000000,
-                                            1e-2 * src.block(1).l2_norm());
+      SolverControl solver_control_pressure(100000,
+                                            1e-1 * src.block(1).l2_norm());
       SolverCG<TrilinosWrappers::MPI::Vector> solver_cg_pressure(
           solver_control_pressure);
       solver_cg_pressure.solve(*pressure_mass,
@@ -303,7 +304,7 @@ protected:
   FunctionU0 u_0;
 
   // Pressure out [Pa]
-  const double p_out = 10.0;
+  const double p_out = 1.0;
 
   // Forcing term
   ForcingTerm forcing_term;
