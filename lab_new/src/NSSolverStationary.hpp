@@ -59,25 +59,32 @@ public:
     vector_value(const Point<dim> & /*p*/,
                  Vector<double> &values) const override
     {
-      // values[0] = std::sin(get_time() * 2.0 * numbers::PI);
-      values[0] = 1.0;
+      // values[0] = 0.01 * std::sin(2.0 * p[0] * numbers::PI);
+      // if (p[0] >= 0.2)
+      // {
+      //   values[0] = 0.1;
+      // }
+      // else
+      // {
+      //   values[0] = 0.0;
+      // }
+
+      values[0] = 0.01;
+
       for (unsigned int i = 1; i < dim + 1; ++i)
         values[i] = 0.0;
     }
 
     virtual double
-    value(const Point<dim> & /*p*/,
+    value(const Point<dim> &/*p*/,
           const unsigned int component = 0) const override
     {
       if (component == 0)
-        return 1.0;
-      // return std::sin(get_time() * 2.0 * numbers::PI);
+        return 0.0;
+      // return 0.01 * std::sin(2.0 * p[0] * numbers::PI);
       else
         return 0.0;
     }
-
-  protected:
-    const double alpha = 1.0;
   };
 
   // Preconditioner
@@ -103,8 +110,8 @@ public:
     vmult(TrilinosWrappers::MPI::BlockVector &dst,
           const TrilinosWrappers::MPI::BlockVector &src) const
     {
-      SolverControl solver_control_velocity(1000,
-                                            1e-2 * src.block(0).l2_norm());
+      SolverControl solver_control_velocity(100001,
+                                            1e-1 * src.block(0).l2_norm());
       SolverCG<TrilinosWrappers::MPI::Vector> solver_cg_velocity(
           solver_control_velocity);
       solver_cg_velocity.solve(*velocity_stiffness,
@@ -112,8 +119,8 @@ public:
                                src.block(0),
                                preconditioner_velocity);
 
-      SolverControl solver_control_pressure(1000,
-                                            1e-2 * src.block(1).l2_norm());
+      SolverControl solver_control_pressure(100000,
+                                            1e-1 * src.block(1).l2_norm());
       SolverCG<TrilinosWrappers::MPI::Vector> solver_cg_pressure(
           solver_control_pressure);
       solver_cg_pressure.solve(*pressure_mass,
@@ -127,13 +134,13 @@ public:
     const TrilinosWrappers::SparseMatrix *velocity_stiffness;
 
     // Preconditioner used for the velocity block.
-    TrilinosWrappers::PreconditionILU preconditioner_velocity;
+    TrilinosWrappers::PreconditionSSOR preconditioner_velocity;
 
     // Pressure mass matrix.
     const TrilinosWrappers::SparseMatrix *pressure_mass;
 
     // Preconditioner used for the pressure block.
-    TrilinosWrappers::PreconditionILU preconditioner_pressure;
+    TrilinosWrappers::PreconditionSSOR preconditioner_pressure;
   };
 
   // Block-triangular preconditioner.
@@ -160,8 +167,8 @@ public:
     vmult(TrilinosWrappers::MPI::BlockVector &dst,
           const TrilinosWrappers::MPI::BlockVector &src) const
     {
-      SolverControl solver_control_velocity(10000000,
-                                            1e-2 * src.block(0).l2_norm());
+      SolverControl solver_control_velocity(100001,
+                                            1e-1 * src.block(0).l2_norm());
       SolverCG<TrilinosWrappers::MPI::Vector> solver_cg_velocity(
           solver_control_velocity);
       solver_cg_velocity.solve(*velocity_stiffness,
@@ -173,8 +180,8 @@ public:
       B->vmult(tmp, dst.block(0));
       tmp.sadd(-1.0, src.block(1));
 
-      SolverControl solver_control_pressure(10000000,
-                                            1e-2 * src.block(1).l2_norm());
+      SolverControl solver_control_pressure(100000,
+                                            1e-1 * src.block(1).l2_norm());
       SolverCG<TrilinosWrappers::MPI::Vector> solver_cg_pressure(
           solver_control_pressure);
       solver_cg_pressure.solve(*pressure_mass,
@@ -205,8 +212,8 @@ public:
 
   // Constructor.
   NSSolverStationary(const std::string &mesh_file_name_,
-           const unsigned int &degree_velocity_,
-           const unsigned int &degree_pressure_)
+                     const unsigned int &degree_velocity_,
+                     const unsigned int &degree_pressure_)
       : mpi_size(Utilities::MPI::n_mpi_processes(MPI_COMM_WORLD)), mpi_rank(Utilities::MPI::this_mpi_process(MPI_COMM_WORLD)), pcout(std::cout, mpi_rank == 0), mesh_file_name(mesh_file_name_), mesh(MPI_COMM_WORLD), degree_velocity(degree_velocity_), degree_pressure(degree_pressure_)
   {
   }
@@ -246,13 +253,13 @@ protected:
   // Problem definition. ///////////////////////////////////////////////////////
 
   // Kinematic viscosity [m2/s]
-  const double nu = 1.0;
+  double nu = 0.001;
 
   // Inlet velocity
   InletVelocity inlet_velocity;
 
   // Pressure out [Pa]
-  const double p_out = 10.0;
+  const double p_out = 1.0;
 
   // Lagrangian
   // const double gamma = 1.0;
@@ -263,11 +270,10 @@ protected:
 
   // Mesh.
   parallel::fullydistributed::Triangulation<dim> mesh;
-  
+
   // Polynomial degrees.
   const unsigned int degree_velocity;
   const unsigned int degree_pressure;
-
 
   // Finite element space.
   std::unique_ptr<FiniteElement<dim>> fe;
