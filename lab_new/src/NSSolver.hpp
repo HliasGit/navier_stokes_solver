@@ -59,8 +59,8 @@ public:
     vector_value(const Point<dim> & /*p*/,
                  Vector<double> &values) const override
     {
-      // values[0] = 0.01 * std::sin(get_time() * 2.0 * numbers::PI);
-      values[0] = 0.01;
+      values[0] = 0.001 * get_time() * std::sin(get_time() * 2.0 * numbers::PI);
+      // values[0] = 0.01 * get_time();
       for (unsigned int i = 1; i < dim + 1; ++i)
         values[i] = 0.0;
     }
@@ -70,8 +70,8 @@ public:
           const unsigned int component = 0) const override
     {
       if (component == 0)
-        return 0.01;
-      // return 0.01 * std::sin(get_time() * 2.0 * numbers::PI);
+        // return 0.01 * get_time();
+      return 0.001 * get_time() * std::sin(get_time() * 2.0 * numbers::PI);
       else
         return 0.0;
     }
@@ -292,7 +292,7 @@ protected:
   // Problem definition. ///////////////////////////////////////////////////////
 
   // Kinematic viscosity [m2/s]
-  double nu = 0.02;
+  double nu = 0.1;
 
   // Inlet velocity
   InletVelocity inlet_velocity;

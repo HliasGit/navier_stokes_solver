@@ -393,6 +393,8 @@ void NSSolverStationary::assemble_system(bool first_iter)
       boundary_functions[7] = &zero_function;
     }
 
+    // dirichlet conditions are not applied to pressure degrees of freedom
+    // for this purpose use a component mask
     VectorTools::interpolate_boundary_values(dof_handler,
                                              boundary_functions,
                                              boundary_values,
@@ -413,7 +415,7 @@ void NSSolverStationary::assemble_system(bool first_iter)
 
 void NSSolverStationary::solve_system()
 {
-  SolverControl solver_control(100000, 1e-14);
+  SolverControl solver_control(100000, 1e-12);
 
   SolverFGMRES<TrilinosWrappers::MPI::BlockVector> solver(solver_control);
 
@@ -440,7 +442,7 @@ void NSSolverStationary::solve_newton()
   double target_Re = 1.0 / nu;
   bool first_iter = true;
 
-  for (double Re = 100.0; Re <= target_Re; Re += 10.0)
+  for (double Re = 100.0; Re <= target_Re; Re += 50.0)
   {
     pcout << "===============================================" << std::endl;
     pcout << "Solving for Re = " << Re << std::endl;
@@ -499,10 +501,13 @@ void NSSolverStationary::solve_newton()
       else
       {
         pcout << " < tolerance" << std::endl;
-        output();
+        // output();
         break;
       }
-      output();
+      if (n_iter == 2)
+      {
+        output();
+      }
       ++n_iter;
     }
   }

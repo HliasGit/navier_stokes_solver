@@ -69,7 +69,7 @@ public:
       //   values[0] = 0.0;
       // }
 
-      values[0] = 0.01;
+      values[0] = 0.1;
 
       for (unsigned int i = 1; i < dim + 1; ++i)
         values[i] = 0.0;
@@ -80,7 +80,7 @@ public:
           const unsigned int component = 0) const override
     {
       if (component == 0)
-        return 0.0;
+        return 0.1;
       // return 0.01 * std::sin(2.0 * p[0] * numbers::PI);
       else
         return 0.0;
@@ -112,7 +112,7 @@ public:
     {
       SolverControl solver_control_velocity(100001,
                                             1e-1 * src.block(0).l2_norm());
-      SolverCG<TrilinosWrappers::MPI::Vector> solver_cg_velocity(
+      SolverFGMRES<TrilinosWrappers::MPI::Vector> solver_cg_velocity(
           solver_control_velocity);
       solver_cg_velocity.solve(*velocity_stiffness,
                                dst.block(0),
@@ -167,9 +167,10 @@ public:
     vmult(TrilinosWrappers::MPI::BlockVector &dst,
           const TrilinosWrappers::MPI::BlockVector &src) const
     {
-      SolverControl solver_control_velocity(100001,
+      SolverControl solver_control_velocity(10000001,
                                             1e-1 * src.block(0).l2_norm());
-      SolverCG<TrilinosWrappers::MPI::Vector> solver_cg_velocity(
+
+      SolverFGMRES<TrilinosWrappers::MPI::Vector> solver_cg_velocity(
           solver_control_velocity);
       solver_cg_velocity.solve(*velocity_stiffness,
                                dst.block(0),
@@ -195,7 +196,7 @@ public:
     const TrilinosWrappers::SparseMatrix *velocity_stiffness;
 
     // Preconditioner used for the velocity block.
-    TrilinosWrappers::PreconditionILU preconditioner_velocity;
+    TrilinosWrappers::PreconditionAMG preconditioner_velocity;
 
     // Pressure mass matrix.
     const TrilinosWrappers::SparseMatrix *pressure_mass;
@@ -253,7 +254,7 @@ protected:
   // Problem definition. ///////////////////////////////////////////////////////
 
   // Kinematic viscosity [m2/s]
-  double nu = 0.001;
+  double nu = 0.0002;
 
   // Inlet velocity
   InletVelocity inlet_velocity;
