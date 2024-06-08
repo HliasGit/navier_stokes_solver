@@ -201,6 +201,10 @@ void NSSolverStationary::assemble_system(bool first_iter)
   std::vector<Tensor<2, dim>> velocity_gradient_loc(n_q);
   std::vector<double> pressure_loc(n_q);
 
+  // tensor used to store the nonlinear term contribution in each quadrature point
+  // useful when computing (u . nabla) uv, corresponding to c(u;u,v) term
+  Tensor<1, dim> nonlinear_term;
+
   for (const auto &cell : dof_handler.active_cell_iterators())
   {
     if (!cell->is_locally_owned())
@@ -255,16 +259,37 @@ void NSSolverStationary::assemble_system(bool first_iter)
 
           else
           {
-            // Frechet derivative
-            // First term
-            cell_matrix(i, j) +=
-                fe_values[velocity].value(j, q) * velocity_gradient_loc[q] *
-                fe_values[velocity].value(i, q) * fe_values.JxW(q);
+            // // Frechet derivative
+            // // First term
+            // cell_matrix(i, j) +=
+            //     fe_values[velocity].value(j, q) * velocity_gradient_loc[q] *
+            //     fe_values[velocity].value(i, q) * fe_values.JxW(q);
 
-            // Second term
-            cell_matrix(i, j) +=
-                velocity_loc[q] * fe_values[velocity].gradient(j, q) *
-                fe_values[velocity].value(i, q) * fe_values.JxW(q);
+            // // Second term
+            // cell_matrix(i, j) +=
+            //     velocity_loc[q] * fe_values[velocity].gradient(j, q) *
+            //     fe_values[velocity].value(i, q) * fe_values.JxW(q);
+
+            // Compute both terms associated with Newton linearization of (u . nabla) u
+            // nabla u is a tensor, iterate over both dimensions
+            for (unsigned int k = 0; k < dim; k++)
+            {
+              nonlinear_term[k] = 0.0;
+              for (unsigned int l = 0; l < dim; l++)
+              {
+                // compute both terms yielded by the Frechet derivative
+                // (u . nabla) u_old
+                nonlinear_term[k] += velocity_loc[q][l] *
+                                     fe_values[velocity].gradient(j, q)[k][l];
+
+                // (u_old . nabla) u
+                nonlinear_term[k] += fe_values[velocity].value(j, q)[l] *
+                                     velocity_gradient_loc[q][k][l];
+              }
+            }
+
+            // assemble the linearized convective term (u . nabla) uv
+            cell_matrix(i, j) += scalar_product(nonlinear_term, fe_values[velocity].value(i, q)) * fe_values.JxW(q);
 
             // Third term - viscosity
             cell_matrix(i, j) +=
@@ -307,9 +332,27 @@ void NSSolverStationary::assemble_system(bool first_iter)
             scalar_product(velocity_gradient_loc[q],
                            fe_values[velocity].gradient(i, q)) *
             fe_values.JxW(q);
-        // c(u;u,v)
-        cell_rhs(i) -= velocity_loc[q] * velocity_gradient_loc[q] *
-                       fe_values[velocity].value(i, q) * fe_values.JxW(q);
+
+        // // c(u;u,v)
+        // cell_rhs(i) -= velocity_loc[q] * velocity_gradient_loc[q] *
+        //                fe_values[velocity].value(i, q) * fe_values.JxW(q);
+
+        // Compute residual associated with Newton linearization of (u . nabla) u
+        // nabla u is a tensor, iterate over both dimensions
+        for (unsigned int k = 0; k < dim; k++)
+        {
+          nonlinear_term[k] = 0.0;
+          for (unsigned int l = 0; l < dim; l++)
+          {
+            // compute (u_old . nabla) u_old
+            nonlinear_term[k] += velocity_loc[q][l] *
+                                 velocity_gradient_loc[q][k][l];
+          }
+        }
+
+        // assemble the residual associated with the nonlinear convective term
+        cell_rhs(i) -= scalar_product(nonlinear_term, fe_values[velocity].value(i, q)) * fe_values.JxW(q);
+
         // b(v,p)
         cell_rhs(i) += pressure_loc[q] *
                        fe_values[velocity].divergence(i, q) *
@@ -415,7 +458,7 @@ void NSSolverStationary::assemble_system(bool first_iter)
 
 void NSSolverStationary::solve_system()
 {
-  SolverControl solver_control(100000, 1e-12);
+  SolverControl solver_control(1000, 1e-12);
 
   SolverFGMRES<TrilinosWrappers::MPI::BlockVector> solver(solver_control);
 
@@ -424,9 +467,13 @@ void NSSolverStationary::solve_system()
                             pressure_mass.block(1, 1),
                             jacobian_matrix.block(1, 0));
 
-  // PreconditionBlockDiagonal preconditioner;
-  // preconditioner.initialize(jacobian_matrix.block(0, 0),
-  //                           pressure_mass.block(1, 1));
+  double alpha = 0.5;
+  PreconditionaSIMPLE preconditioner_asimple;
+  preconditioner_asimple.initialize(jacobian_matrix.block(0, 0),
+                                   jacobian_matrix.block(1, 0),
+                                   jacobian_matrix.block(0, 1),
+                                   solution_owned,
+                                   alpha);
 
   solver.solve(jacobian_matrix, delta_owned, residual_vector, preconditioner);
   pcout << "   " << solver_control.last_step() << " GMRES iterations"
@@ -442,7 +489,7 @@ void NSSolverStationary::solve_newton()
   double target_Re = 1.0 / nu;
   bool first_iter = true;
 
-  for (double Re = 100.0; Re <= target_Re; Re += 50.0)
+  for (double Re = 1.0; Re <= target_Re; Re += 10.0)
   {
     pcout << "===============================================" << std::endl;
     pcout << "Solving for Re = " << Re << std::endl;
@@ -500,16 +547,15 @@ void NSSolverStationary::solve_newton()
       }
       else
       {
+        // newton method already converged for the current Re number, print tolerance and output
         pcout << " < tolerance" << std::endl;
-        // output();
-        break;
-      }
-      if (n_iter == 2)
-      {
         output();
+        break;
       }
       ++n_iter;
     }
+
+    output();
   }
 
   pcout << "===============================================" << std::endl;

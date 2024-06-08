@@ -56,35 +56,27 @@ public:
     }
 
     virtual void
-    vector_value(const Point<dim> & /*p*/,
+    vector_value(const Point<dim> &p,
                  Vector<double> &values) const override
     {
-      // values[0] = 0.01 * std::sin(2.0 * p[0] * numbers::PI);
-      // if (p[0] >= 0.2)
-      // {
-      //   values[0] = 0.1;
-      // }
-      // else
-      // {
-      //   values[0] = 0.0;
-      // }
-
-      values[0] = 0.1;
+      // in flow condition is: 4 * U_m * (H - h) / H^2
+      values[0] = 4 * U_m * p[1] * (H - p[0]) / (H * H);
 
       for (unsigned int i = 1; i < dim + 1; ++i)
         values[i] = 0.0;
     }
 
     virtual double
-    value(const Point<dim> &/*p*/,
+    value(const Point<dim> &p,
           const unsigned int component = 0) const override
     {
       if (component == 0)
-        return 0.1;
-      // return 0.01 * std::sin(2.0 * p[0] * numbers::PI);
+        return 4 * U_m * p[1] * (H - p[0]) / (H * H);
       else
         return 0.0;
     }
+    const double U_m = 0.01;
+    const double H = 0.41;
   };
 
   // Preconditioner
@@ -211,6 +203,117 @@ public:
     mutable TrilinosWrappers::MPI::Vector tmp;
   };
 
+  class PreconditionaSIMPLE
+  {
+  public:
+    // Initialize the preconditioner
+    void
+    initialize(const TrilinosWrappers::SparseMatrix &F_,
+               const TrilinosWrappers::SparseMatrix &B_neg_,
+               const TrilinosWrappers::SparseMatrix &B_t_,
+               const TrilinosWrappers::MPI::BlockVector &vector_,
+               const double &alpha_)
+    {
+      F_matrix = &F_;
+      B_neg_matrix = &B_neg_;
+      B_t_matrix = &B_t_;
+      alpha = alpha_;
+
+      // compute diag(F)^{-1}
+      D_inv_vector.reinit(vector_.block(0));
+      for (unsigned int i : D_inv_vector.locally_owned_elements())
+      {
+        const double temp = F_matrix->diag_element(i);
+        D_inv_vector[i] = 1.0 / temp;
+      }
+
+      // assemble approximate of Schur complement as S = B * D_inv_vector * B^T
+      B_neg_matrix->mmult(S_matrix, *B_t_matrix, D_inv_vector);
+
+      preconditioner_F.initialize(*F_matrix);
+      preconditioner_S.initialize(S_matrix);
+    }
+
+    // Application of the preconditioner.
+    void
+    vmult(TrilinosWrappers::MPI::BlockVector &dst,
+          const TrilinosWrappers::MPI::BlockVector &src) const
+    {
+      // Solve F x_u and store result in dst.block(0)
+      SolverControl solver_control_F(10000001,
+                                     1e-1 * src.block(0).l2_norm());
+      SolverGMRES<TrilinosWrappers::MPI::Vector> solver_F(
+          solver_control_F);
+
+      solver_F.solve(*F_matrix,
+                     dst.block(0),
+                     src.block(0),
+                     preconditioner_F);
+
+      // compute - B * F^{-1} * x_u and store result in tmp
+      tmp.reinit(src.block(1));
+      B_neg_matrix->vmult(tmp, dst.block(0));
+
+      // compute tmp + I x_p and store result in tmp
+      tmp.sadd(1.0, src.block(1));
+
+      // Solve S x_p and store result in dst.block(1)
+      SolverControl solver_control_S(10000000,
+                                     1e-1 * src.block(1).l2_norm());
+      SolverGMRES<TrilinosWrappers::MPI::Vector> solver_S(
+          solver_control_S);
+      solver_S.solve(S_matrix,
+                     dst.block(1),
+                     tmp,
+                     preconditioner_S);
+
+      // scale dst.block(1) by 1/alpha
+      dst.block(1) *= 1.0 / alpha;
+
+      // compute B_t_matrix * dst.block(1) and store result in tmp
+      tmp.reinit(src.block(0));
+      B_t_matrix->vmult(tmp, dst.block(1));
+
+      // multiply the D_inv_vector by the tmp vector and store the result in the tmp vector
+      for(unsigned int i : D_inv_vector.locally_owned_elements())
+      {
+        tmp[i] *= D_inv_vector[i];
+      }
+
+      // compute dst.block(0) - tmp and store result in dst.block(0)
+      dst.block(0).sadd(-1.0, tmp);
+    }
+
+  protected:
+    // F = 1/delta_t * M + A + C, where M is the mass matrix, A is the stiffness matrix
+    // and C is the matrix corresponding to the linearized convective term
+    const TrilinosWrappers::SparseMatrix *F_matrix;
+
+    // vector obtained from diag(F)^{-1}, thus inverse of the diag(F)
+    TrilinosWrappers::MPI::Vector D_inv_vector;
+
+    // approximation of the Schur complement S=BD^{-1}B^T
+    TrilinosWrappers::SparseMatrix S_matrix;
+
+    // damping parameter alpha in [0,1]
+    double alpha;
+
+    // Preconditioner used to approximate F^{-1}
+    TrilinosWrappers::PreconditionILU preconditioner_F;
+
+    // Preconditioner used to approximate S^{-1}
+    TrilinosWrappers::PreconditionILU preconditioner_S;
+
+    // B matrix.
+    const TrilinosWrappers::SparseMatrix *B_neg_matrix;
+    
+    // B transpose matrix, needed to compute S
+    const TrilinosWrappers::SparseMatrix *B_t_matrix;
+
+    // Temporary vector.
+    mutable TrilinosWrappers::MPI::Vector tmp;
+  };
+
   // Constructor.
   NSSolverStationary(const std::string &mesh_file_name_,
                      const unsigned int &degree_velocity_,
@@ -254,7 +357,7 @@ protected:
   // Problem definition. ///////////////////////////////////////////////////////
 
   // Kinematic viscosity [m2/s]
-  double nu = 0.0002;
+  double nu = 0.001;
 
   // Inlet velocity
   InletVelocity inlet_velocity;
