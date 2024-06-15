@@ -56,26 +56,29 @@ public:
     }
 
     virtual void
-    vector_value(const Point<dim> & /*p*/,
+    vector_value(const Point<dim> &p,
                  Vector<double> &values) const override
     {
-      values[0] = 0.001 * get_time() * std::sin(get_time() * 2.0 * numbers::PI);
-      // values[0] = 0.01 * get_time();
+      // in flow condition is: 4 * U_m * (H - y) / H^2
+      values[0] = 4 * U_m * p[1] * (H - p[1]) / (H * H);
+
       for (unsigned int i = 1; i < dim + 1; ++i)
         values[i] = 0.0;
     }
 
     virtual double
-    value(const Point<dim> & /*p*/,
+    value(const Point<dim> &p,
           const unsigned int component = 0) const override
     {
       if (component == 0)
-        // return 0.01 * get_time();
-      return 0.001 * get_time() * std::sin(get_time() * 2.0 * numbers::PI);
+        return 4 * U_m * p[1] * (H - p[1]) / (H * H);
       else
         return 0.0;
     }
+    const double U_m = 0.3;
+    const double H = 0.41;
   };
+
 
   // Function for the forcing term.
   class ForcingTerm : public Function<dim>

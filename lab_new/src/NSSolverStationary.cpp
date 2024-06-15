@@ -470,9 +470,16 @@ void NSSolverStationary::solve_system()
   double alpha = 0.5;
   PreconditionaSIMPLE preconditioner_asimple;
   preconditioner_asimple.initialize(jacobian_matrix.block(0, 0),
+                                    jacobian_matrix.block(1, 0),
+                                    jacobian_matrix.block(0, 1),
+                                    delta_owned,
+                                    alpha);
+
+  PreconditionSIMPLE preconditioner_simple;
+  preconditioner_simple.initialize(jacobian_matrix.block(0, 0),
                                    jacobian_matrix.block(1, 0),
                                    jacobian_matrix.block(0, 1),
-                                   solution_owned,
+                                   delta_owned,
                                    alpha);
 
   solver.solve(jacobian_matrix, delta_owned, residual_vector, preconditioner);
@@ -489,7 +496,7 @@ void NSSolverStationary::solve_newton()
   double target_Re = 1.0 / nu;
   bool first_iter = true;
 
-  for (double Re = 1.0; Re <= target_Re; Re += 10.0)
+  for (double Re = 100.0; Re <= target_Re; Re += 10.0)
   {
     pcout << "===============================================" << std::endl;
     pcout << "Solving for Re = " << Re << std::endl;

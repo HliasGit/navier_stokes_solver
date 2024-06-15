@@ -467,7 +467,7 @@ void NSSolver::solve_newton()
   double target_Re = 1.0 / nu;
   bool first_iter = true;
 
-  for (double Re = 1.0; Re <= target_Re; Re += 10.0)
+  for (double Re = 10.0; Re <= target_Re; Re += 10.0)
   {
     pcout << "===============================================" << std::endl;
     pcout << "Solving for Re = " << Re << std::endl;
