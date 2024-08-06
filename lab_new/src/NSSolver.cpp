@@ -415,7 +415,7 @@ void NSSolver::assemble_system(bool first_iter)
 
     boundary_values.clear();
 
-    if (first_iter)
+    if (first_iter && apply_first)
     {
       boundary_functions[7] = &inlet_velocity;
     }
@@ -442,7 +442,7 @@ void NSSolver::assemble_system(bool first_iter)
   }
 }
 
-void NSSolver::solve_system()
+int NSSolver::solve_system()
 {
   SolverControl solver_control(100000, 1e-12);
 
@@ -456,18 +456,19 @@ void NSSolver::solve_system()
   solver.solve(jacobian_matrix, delta_owned, residual_vector, preconditioner);
   pcout << "   " << solver_control.last_step() << " GMRES iterations"
         << std::endl;
+  return solver_control.last_step();
 }
 
 void NSSolver::solve_newton()
 {
   pcout << "===============================================" << std::endl;
 
-  const unsigned int n_max_iters = 1000;
-  const double residual_tolerance = 1e-8;
+  const unsigned int n_max_iters = 5;
+  const double residual_tolerance = 1e-9;
   double target_Re = 1.0 / nu;
   bool first_iter = true;
 
-  for (double Re = 10.0; Re <= target_Re; Re += 10.0)
+  for (double Re = 10.0; Re <= target_Re; Re += 240)
   {
     pcout << "===============================================" << std::endl;
     pcout << "Solving for Re = " << Re << std::endl;
@@ -476,6 +477,7 @@ void NSSolver::solve_newton()
     unsigned int n_iter = 0;
     double residual_norm = residual_tolerance + 1;
     double prev_residual;
+    int GMRES_iter = 0;
 
     while (n_iter < n_max_iters && residual_norm > residual_tolerance)
     {
@@ -501,7 +503,9 @@ void NSSolver::solve_newton()
       // tolerance.
       if (residual_norm > residual_tolerance)
       {
-        solve_system();
+        GMRES_iter = solve_system();
+
+        if (GMRES_iter == 0) break;
 
         evaluation_point = solution;
 
@@ -517,7 +521,7 @@ void NSSolver::solve_newton()
 
           pcout << "  Evaluating alpha=" << alpha << ", ||r||=" << residual_norm << std::endl;
 
-          if (residual_norm < prev_residual)
+          if (residual_norm <= prev_residual)
             break;
         }
 
@@ -607,6 +611,7 @@ void NSSolver::solve()
     // At every time step, we invoke Newton's method to solve the non-linear
     // problem.
     solve_newton();
+    apply_first = false;
 
     output(time_step);
 

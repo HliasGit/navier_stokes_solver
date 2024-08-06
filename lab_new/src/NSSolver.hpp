@@ -148,7 +148,7 @@ public:
           const TrilinosWrappers::MPI::BlockVector &src) const
     {
       SolverControl solver_control_velocity(1000,
-                                            1e-2 * src.block(0).l2_norm());
+                                            1e-1);
       SolverCG<TrilinosWrappers::MPI::Vector> solver_cg_velocity(
           solver_control_velocity);
       solver_cg_velocity.solve(*velocity_stiffness,
@@ -157,7 +157,7 @@ public:
                                preconditioner_velocity);
 
       SolverControl solver_control_pressure(1000,
-                                            1e-2 * src.block(1).l2_norm());
+                                            1e-1);
       SolverCG<TrilinosWrappers::MPI::Vector> solver_cg_pressure(
           solver_control_pressure);
       solver_cg_pressure.solve(*pressure_mass,
@@ -204,8 +204,8 @@ public:
     vmult(TrilinosWrappers::MPI::BlockVector &dst,
           const TrilinosWrappers::MPI::BlockVector &src) const
     {
-      SolverControl solver_control_velocity(100001,
-                                            1e-1 * src.block(0).l2_norm());
+      SolverControl solver_control_velocity(2000001,
+                                            1e-1);
       SolverCG<TrilinosWrappers::MPI::Vector> solver_cg_velocity(
           solver_control_velocity);
       solver_cg_velocity.solve(*velocity_stiffness,
@@ -217,8 +217,8 @@ public:
       B->vmult(tmp, dst.block(0));
       tmp.sadd(-1.0, src.block(1));
 
-      SolverControl solver_control_pressure(100000,
-                                            1e-1 * src.block(1).l2_norm());
+      SolverControl solver_control_pressure(2000000,
+                                            1e-1);
       SolverCG<TrilinosWrappers::MPI::Vector> solver_cg_pressure(
           solver_control_pressure);
       solver_cg_pressure.solve(*pressure_mass,
@@ -246,6 +246,9 @@ public:
     // Temporary vector.
     mutable TrilinosWrappers::MPI::Vector tmp;
   };
+
+  public:
+    bool apply_first=true;
 
   // Constructor.
   NSSolver(const std::string &mesh_file_name_,
@@ -278,7 +281,7 @@ protected:
   assemble_system(bool first_iter);
 
   // Solve the tangent problem.
-  void
+  int
   solve_system();
 
   // MPI parallel. /////////////////////////////////////////////////////////////
@@ -295,7 +298,7 @@ protected:
   // Problem definition. ///////////////////////////////////////////////////////
 
   // Kinematic viscosity [m2/s]
-  double nu = 0.1;
+  double nu = 0.002;
 
   // Inlet velocity
   InletVelocity inlet_velocity;
