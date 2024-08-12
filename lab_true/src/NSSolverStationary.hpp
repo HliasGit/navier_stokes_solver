@@ -75,7 +75,7 @@ public:
       else
         return 0.0;
     }
-    const double U_m = 0.3;
+    const double U_m = 1.5;
     const double H = 0.41;
   };
 
@@ -162,15 +162,12 @@ public:
       SolverControl solver_control_velocity(10000001,
                                             1e-1 * src.block(0).l2_norm());
 
-      SolverFGMRES<TrilinosWrappers::MPI::Vector> solver_gmres_velocity(
+      SolverFGMRES<TrilinosWrappers::MPI::Vector> solver_cg_velocity(
           solver_control_velocity);
-      solver_gmres_velocity.solve(*velocity_stiffness,
-                                  dst.block(0),
-                                  src.block(0),
-                                  preconditioner_velocity);
-
-      // UNCOMMENT if do not want to use direct solver
-      // preconditioner_velocity.vmult(dst.block(0), tmp.block(0));
+      solver_cg_velocity.solve(*velocity_stiffness,
+                               dst.block(0),
+                               src.block(0),
+                               preconditioner_velocity);
 
       tmp.reinit(src.block(1));
       B->vmult(tmp, dst.block(0));
@@ -259,9 +256,7 @@ public:
                      dst.block(0),
                      src.block(0),
                      preconditioner_F);
-
-      // // if do not want to use direct solver
-      // preconditioner_F.vmult(dst.block(0), src.block(0));
+      preconditioner_F.vmult(dst.block(0), src.block(0));
 
       // store src.block(1) in tmp.block(1)
       tmp.block(1) = src.block(1);
@@ -282,8 +277,7 @@ public:
                      tmp.block(1),
                      preconditioner_S);
 
-      // // if do not want to use direct solver
-      // preconditioner_S.vmult(dst.block(1), tmp.block(1));
+      preconditioner_S.vmult(dst.block(1), tmp.block(1));
 
       // compute multiplication by [D 0; 0 I*1/alpha]
       dst.block(0).scale(D_vector);
@@ -342,23 +336,20 @@ public:
   void
   setup();
 
-  // Solve the problem using Newton's method.
-  void
-  solve_newton();
-
   // Output.
   void
   output() const;
 
-protected:
+public:
   // Assemble the tangent problem.
   void
-  assemble_system(bool first_iter);
+  assemble_system();
 
   // Solve the tangent problem.
   void
   solve_system();
 
+protected:
   // MPI parallel. /////////////////////////////////////////////////////////////
 
   // Number of MPI processes.
@@ -373,7 +364,7 @@ protected:
   // Problem definition. ///////////////////////////////////////////////////////
 
   // Kinematic viscosity [m2/s]
-  double nu = 0.001;
+  double nu = 0.01;
 
   // Inlet velocity
   InletVelocity inlet_velocity;
@@ -429,9 +420,6 @@ protected:
   // Residual vector.
   TrilinosWrappers::MPI::BlockVector residual_vector;
 
-  // Solution increment (without ghost elements).
-  TrilinosWrappers::MPI::BlockVector delta_owned;
-
   // System solution (without ghost elements).
   TrilinosWrappers::MPI::BlockVector solution_owned;
 
@@ -440,9 +428,6 @@ protected:
 
   // Evaluation point, used to find an optimal update in the Newton iteration
   TrilinosWrappers::MPI::BlockVector evaluation_point;
-
-  // Lift and Drag forces  ///////////////////////////////////////////////////////////
-  void compute_lift_drag();
 };
 
 #endif

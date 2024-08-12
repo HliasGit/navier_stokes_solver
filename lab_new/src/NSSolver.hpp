@@ -149,9 +149,9 @@ public:
     {
       SolverControl solver_control_velocity(1000,
                                             1e-1);
-      SolverCG<TrilinosWrappers::MPI::Vector> solver_cg_velocity(
+      SolverFGMRES<TrilinosWrappers::MPI::Vector> solver_gmres_velocity(
           solver_control_velocity);
-      solver_cg_velocity.solve(*velocity_stiffness,
+      solver_gmres_velocity.solve(*velocity_stiffness,
                                dst.block(0),
                                src.block(0),
                                preconditioner_velocity);
@@ -205,10 +205,10 @@ public:
           const TrilinosWrappers::MPI::BlockVector &src) const
     {
       SolverControl solver_control_velocity(2000001,
-                                            1e-1);
-      SolverCG<TrilinosWrappers::MPI::Vector> solver_cg_velocity(
+                                            1e-1 * src.block(0).l2_norm());
+      SolverFGMRES<TrilinosWrappers::MPI::Vector> solver_gmres_velocity(
           solver_control_velocity);
-      solver_cg_velocity.solve(*velocity_stiffness,
+      solver_gmres_velocity.solve(*velocity_stiffness,
                                dst.block(0),
                                src.block(0),
                                preconditioner_velocity);
@@ -218,7 +218,7 @@ public:
       tmp.sadd(-1.0, src.block(1));
 
       SolverControl solver_control_pressure(2000000,
-                                            1e-1);
+                                            1e-1 * src.block(1).l2_norm());
       SolverCG<TrilinosWrappers::MPI::Vector> solver_cg_pressure(
           solver_control_pressure);
       solver_cg_pressure.solve(*pressure_mass,
@@ -245,6 +245,130 @@ public:
 
     // Temporary vector.
     mutable TrilinosWrappers::MPI::Vector tmp;
+  };
+
+  class PreconditionaSIMPLE
+  {
+  public:
+    // Initialize the preconditioner
+    void
+    initialize(const TrilinosWrappers::SparseMatrix &F_,
+               const TrilinosWrappers::SparseMatrix &B_neg_,
+               const TrilinosWrappers::SparseMatrix &B_t_,
+               const TrilinosWrappers::MPI::BlockVector &vector_,
+               const double &alpha_)
+    {
+      F_matrix = &F_;
+      B_neg_matrix = &B_neg_;
+      B_t_matrix = &B_t_;
+      alpha = alpha_;
+
+      D_vector.reinit(vector_.block(0));
+      D_inv_vector.reinit(vector_.block(0));
+      // compute diag(F) and diag(F)^{-1} and save it to the respective vector
+      for (unsigned int i : D_vector.locally_owned_elements())
+      {
+        const double tmp = F_matrix->diag_element(i);
+        D_vector[i] = tmp;
+        D_inv_vector[i] = 1.0 / tmp;
+      }
+
+      // assemble approximate of Schur complement as S = B * D_inv_vector * B^T
+      B_neg_matrix->mmult(S_neg_matrix, *B_t_matrix, D_inv_vector);
+
+      preconditioner_F.initialize(F_);
+      preconditioner_S.initialize(S_neg_matrix);
+    }
+
+    // Application of the preconditioner.
+    void
+    vmult(TrilinosWrappers::MPI::BlockVector &dst,
+          const TrilinosWrappers::MPI::BlockVector &src) const
+    {
+      // reinit temp vector to store intermediate results
+      tmp.reinit(src);
+
+      // compute multiplication [F^{-1} 0; 0 I] * src
+      // solve linear system associated with F^{-1} * src.block(0) and store result in dst.block(0)
+
+      SolverControl solver_control_F(10000001,
+                                     1e-1 * src.block(0).l2_norm());
+      SolverGMRES<TrilinosWrappers::MPI::Vector> solver_F(
+          solver_control_F);
+
+      solver_F.solve(*F_matrix,
+                     dst.block(0),
+                     src.block(0),
+                     preconditioner_F);
+
+      // // if do not want to use direct solver
+      // preconditioner_F.vmult(dst.block(0), src.block(0));
+
+      // store src.block(1) in tmp.block(1)
+      tmp.block(1) = src.block(1);
+
+      // compute multiplication by [I 0; -B I]
+      // compute -B * dst.block(0) + tmp.block(1) and store result in tmp.block(1)
+      B_neg_matrix->vmult_add(tmp.block(1), dst.block(0));
+
+      // compute multiplication by [I 0; 0 -S^{-1}]
+      // solve linear system associated with the approximate Schur complement
+
+      SolverControl solver_control_S(10000000,
+                                     1e-1 * tmp.block(1).l2_norm());
+      SolverGMRES<TrilinosWrappers::MPI::Vector> solver_S(
+          solver_control_S);
+      solver_S.solve(S_neg_matrix,
+                     dst.block(1),
+                     tmp.block(1),
+                     preconditioner_S);
+
+      // // if do not want to use direct solver
+      // preconditioner_S.vmult(dst.block(1), tmp.block(1));
+
+      // compute multiplication by [D 0; 0 I*1/alpha]
+      dst.block(0).scale(D_vector);
+      dst.block(1) *= 1.0 / alpha;
+
+      // compute multiplication by [I -B^T; 0 I]
+      B_t_matrix->vmult(tmp.block(0), dst.block(1));
+      dst.block(0) -= tmp.block(0);
+
+      // compute multiplication by [D^{-1} 0; 0 I]
+      dst.block(0).scale(D_inv_vector);
+    }
+
+  protected:
+    // F = 1/delta_t * M + A + C, where M is the mass matrix, A is the stiffness matrix
+    // and C is the matrix corresponding to the linearized convective term
+    const TrilinosWrappers::SparseMatrix *F_matrix;
+
+    // vector obtained from diag(F)
+    TrilinosWrappers::MPI::Vector D_vector;
+
+    // vector obtained from diag(F)^{-1}, thus inverse of the diag(F)
+    TrilinosWrappers::MPI::Vector D_inv_vector;
+
+    // approximation of the Schur complement -S=-BD^{-1}B^T
+    TrilinosWrappers::SparseMatrix S_neg_matrix;
+
+    // damping parameter alpha in [0,1]
+    double alpha;
+
+    // Preconditioner used to approximate F^{-1}
+    TrilinosWrappers::PreconditionSSOR preconditioner_F;
+
+    // Preconditioner used to approximate S^{-1}
+    TrilinosWrappers::PreconditionSSOR preconditioner_S;
+
+    // B matrix.
+    const TrilinosWrappers::SparseMatrix *B_neg_matrix;
+
+    // B transpose matrix, needed to compute S
+    const TrilinosWrappers::SparseMatrix *B_t_matrix;
+
+    // Temporary vector.
+    mutable TrilinosWrappers::MPI::BlockVector tmp;
   };
 
   public:
@@ -298,7 +422,7 @@ protected:
   // Problem definition. ///////////////////////////////////////////////////////
 
   // Kinematic viscosity [m2/s]
-  double nu = 0.002;
+  double nu = 0.1;
 
   // Inlet velocity
   InletVelocity inlet_velocity;

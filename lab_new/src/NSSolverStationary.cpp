@@ -134,19 +134,23 @@ void NSSolverStationary::setup()
     DoFTools::make_sparsity_pattern(dof_handler, coupling, sparsity);
     sparsity.compress();
 
-    // We also build a sparsity pattern for the pressure mass matrix.
+    TrilinosWrappers::BlockSparsityPattern sparsity_pressure_mass(
+        block_owned_dofs, MPI_COMM_WORLD);
+
+    // Do the same for the pressure mass term.
+    TrilinosWrappers::BlockSparsityPattern pressure_mass_sparsity(
+        block_owned_dofs, MPI_COMM_WORLD);
     for (unsigned int c = 0; c < dim + 1; ++c)
     {
       for (unsigned int d = 0; d < dim + 1; ++d)
       {
-        if (c == dim && d == dim) // pressure-pressure term
+        if (c == dim && d == dim) // terms with only pressure
           coupling[c][d] = DoFTools::always;
-        else // other combinations
+        else // terms with velocity
           coupling[c][d] = DoFTools::none;
       }
     }
-    TrilinosWrappers::BlockSparsityPattern sparsity_pressure_mass(
-        block_owned_dofs, MPI_COMM_WORLD);
+
     DoFTools::make_sparsity_pattern(dof_handler,
                                     coupling,
                                     sparsity_pressure_mass);
@@ -195,7 +199,7 @@ void NSSolverStationary::assemble_system(bool first_iter)
   FEValuesExtractors::Vector velocity(0);
   FEValuesExtractors::Scalar pressure(dim);
 
-  // We use these vectors to store the old solution (i.e. at previous Newton
+  // We use the following vectors to store the old solution (i.e. at previous Newton
   // iteration) and its gradient on quadrature nodes of the current cell.
   std::vector<Tensor<1, dim>> velocity_loc(n_q);
   std::vector<Tensor<2, dim>> velocity_gradient_loc(n_q);
@@ -313,7 +317,7 @@ void NSSolverStationary::assemble_system(bool first_iter)
             //   gamma * fe_values[velocity].divergence(i, q) *
             //   fe_values[velocity].divergence(j, q) * fe_values.JxW(q);
 
-            // Pressure mass matrix
+            // Pressure mass matrix used for preconditioning
             cell_pressure_mass_matrix(i, j) +=
                 fe_values[pressure].value(i, q) *
                 fe_values[pressure].value(j, q) / nu * fe_values.JxW(q);
@@ -458,7 +462,7 @@ void NSSolverStationary::assemble_system(bool first_iter)
 
 void NSSolverStationary::solve_system()
 {
-  SolverControl solver_control(1000, 1e-12);
+  SolverControl solver_control(20000, 1e-12);
 
   SolverFGMRES<TrilinosWrappers::MPI::BlockVector> solver(solver_control);
 
@@ -467,20 +471,13 @@ void NSSolverStationary::solve_system()
                             pressure_mass.block(1, 1),
                             jacobian_matrix.block(1, 0));
 
-  double alpha = 0.5;
-  PreconditionaSIMPLE preconditioner_asimple;
-  preconditioner_asimple.initialize(jacobian_matrix.block(0, 0),
-                                    jacobian_matrix.block(1, 0),
-                                    jacobian_matrix.block(0, 1),
-                                    delta_owned,
-                                    alpha);
-
-  PreconditionSIMPLE preconditioner_simple;
-  preconditioner_simple.initialize(jacobian_matrix.block(0, 0),
-                                   jacobian_matrix.block(1, 0),
-                                   jacobian_matrix.block(0, 1),
-                                   delta_owned,
-                                   alpha);
+  // double alpha = 0.5;
+  // PreconditionaSIMPLE preconditioner_asimple;
+  // preconditioner_asimple.initialize(jacobian_matrix.block(0, 0),
+  //                                   jacobian_matrix.block(1, 0),
+  //                                   jacobian_matrix.block(0, 1),
+  //                                   delta_owned,
+  //                                   alpha);
 
   solver.solve(jacobian_matrix, delta_owned, residual_vector, preconditioner);
   pcout << "   " << solver_control.last_step() << " GMRES iterations"
@@ -491,12 +488,12 @@ void NSSolverStationary::solve_newton()
 {
   pcout << "===============================================" << std::endl;
 
-  const unsigned int n_max_iters = 1000;
-  const double residual_tolerance = 1e-8;
+  const unsigned int n_max_iters = 50;
+  const double residual_tolerance = 1e-7;
   double target_Re = 1.0 / nu;
   bool first_iter = true;
 
-  for (double Re = 100.0; Re <= target_Re; Re += 10.0)
+  for (double Re = 500.0; Re <= target_Re; Re += 300.0)
   {
     pcout << "===============================================" << std::endl;
     pcout << "Solving for Re = " << Re << std::endl;
@@ -559,10 +556,11 @@ void NSSolverStationary::solve_newton()
         output();
         break;
       }
+      output();
       ++n_iter;
     }
 
-    output();
+    // output();
   }
 
   pcout << "===============================================" << std::endl;
@@ -603,4 +601,101 @@ void NSSolverStationary::output() const
 
   pcout << "Output written to " << output_file_name << std::endl;
   pcout << "===============================================" << std::endl;
+}
+
+void NSSolverStationary::compute_lift_drag()
+{
+  pcout << "===============================================" << std::endl;
+  pcout << "Computing lift and drag forces" << std::endl;
+
+  // variables to store lift and drag forces
+  double lift_force = 0.0;
+  double drag_force = 0.0;
+
+  const unsigned int dofs_per_cell = fe->dofs_per_cell;
+  const unsigned int n_q_face = quadrature->size();
+
+  // need to iterate over all the cells corresponding to the cylindrical obstacle in order to compute the forces
+  FEFaceValues<dim> fe_face_values(*fe,
+                                   *quadrature_face,
+                                   update_values | update_normal_vectors |
+                                       update_JxW_values);
+
+  FEValuesExtractors::Vector velocity(0);
+  FEValuesExtractors::Scalar pressure(dim);
+
+  std::vector<types::global_dof_index> dof_indices(dofs_per_cell);
+
+  // We use the following vectors to store the old solution (i.e. at previous Newton
+  // iteration) and its gradient on quadrature nodes of the current cell.
+  std::vector<Tensor<1, dim>> velocity_loc(n_q_face);
+  std::vector<Tensor<2, dim>> velocity_gradient_loc(n_q_face);
+  std::vector<double> pressure_loc(n_q_face);
+
+  // declare shear stress tensor and force tensor
+  Tensor<2, dim> shear_stress;
+  Tensor<1, dim> force;
+
+  for (const auto &cell : dof_handler.active_cell_iterators())
+  {
+    if (!cell->is_locally_owned())
+      continue;
+
+    for (unsigned int f = 0; f < cell->n_faces(); ++f)
+    {
+      if (cell->face(f)->at_boundary() &&
+          cell->face(f)->boundary_id() == 8)
+      {
+        fe_face_values.reinit(cell, f);
+
+        fe_face_values[velocity].get_function_values(solution, velocity_loc);
+
+        fe_face_values[velocity].get_function_gradients(solution, velocity_gradient_loc);
+
+        fe_face_values[pressure].get_function_values(solution, pressure_loc);
+
+        for (unsigned int q = 0; q < n_q_face; ++q)
+        {
+          // Get the normal vector to the cylinder surface
+          // note that the normal vector is pointing in the opposite direction with 
+          // respect to the one in the provided formulae
+          const Tensor<1, dim> &negative_normal_vector = fe_face_values.normal_vector(q);
+
+          // Calculate the shear stress tensor (which is coplanar with the cylinder cross section)
+          // it is the component of the force vector parallel to the cylinder cross section
+          shear_stress = velocity_gradient_loc[q];
+          for (unsigned int i = 0; i < dim; i++)
+          {
+            for (unsigned int j = 0; j < dim; j++)
+            {
+              shear_stress[i][j] += velocity_gradient_loc[q][j][i];
+            }
+          }
+          shear_stress *= nu;
+          for (unsigned int i = 0; i < dim; i++)
+          {
+            shear_stress[i][i] -= pressure_loc[q];
+          }
+
+          // compute the force acting on the cylinder
+          force = - shear_stress * negative_normal_vector *
+                  fe_face_values.JxW(q);
+
+          // Update drag and lift forces
+          drag_force += force[0];
+          lift_force += force[1];
+        }
+      }
+    }
+  }
+
+  // Sum the drag and lift forces across all processes.
+  lift_force = Utilities::MPI::sum(lift_force, MPI_COMM_WORLD);
+  drag_force = Utilities::MPI::sum(drag_force, MPI_COMM_WORLD);
+
+  // Print the results.
+  // pcout << "  Strong lift coefficient: " << get_lift(false)
+  //                          << std::endl;
+  // pcout << "  Strong drag coefficient: " << get_drag(false)
+  //                          << std::endl;
 }
