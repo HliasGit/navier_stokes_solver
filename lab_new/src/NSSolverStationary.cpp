@@ -493,7 +493,7 @@ void NSSolverStationary::solve_newton()
   double target_Re = 1.0 / nu;
   bool first_iter = true;
 
-  for (double Re = 500.0; Re <= target_Re; Re += 300.0)
+  for (double Re = 100.0; Re <= target_Re; Re += 300.0)
   {
     pcout << "===============================================" << std::endl;
     pcout << "Solving for Re = " << Re << std::endl;
@@ -609,16 +609,16 @@ void NSSolverStationary::compute_lift_drag()
   pcout << "Computing lift and drag forces" << std::endl;
 
   // variables to store lift and drag forces
-  double lift_force = 0.0;
-  double drag_force = 0.0;
+  double local_lift_force = 0.0;
+  double local_drag_force = 0.0;
 
   const unsigned int dofs_per_cell = fe->dofs_per_cell;
-  const unsigned int n_q_face = quadrature->size();
+  const unsigned int n_q_face = quadrature_face->size();
 
   // need to iterate over all the cells corresponding to the cylindrical obstacle in order to compute the forces
   FEFaceValues<dim> fe_face_values(*fe,
                                    *quadrature_face,
-                                   update_values | update_normal_vectors |
+                                   update_values | update_quadrature_points | update_gradients | update_normal_vectors |
                                        update_JxW_values);
 
   FEValuesExtractors::Vector velocity(0);
@@ -636,6 +636,8 @@ void NSSolverStationary::compute_lift_drag()
   Tensor<2, dim> shear_stress;
   Tensor<1, dim> force;
 
+  pcout << "Debug " << std::endl;
+  
   for (const auto &cell : dof_handler.active_cell_iterators())
   {
     if (!cell->is_locally_owned())
@@ -644,7 +646,7 @@ void NSSolverStationary::compute_lift_drag()
     for (unsigned int f = 0; f < cell->n_faces(); ++f)
     {
       if (cell->face(f)->at_boundary() &&
-          cell->face(f)->boundary_id() == 8)
+          cell->face(f)->boundary_id() == 6)
       {
         fe_face_values.reinit(cell, f);
 
@@ -682,20 +684,26 @@ void NSSolverStationary::compute_lift_drag()
                   fe_face_values.JxW(q);
 
           // Update drag and lift forces
-          drag_force += force[0];
-          lift_force += force[1];
+          local_drag_force += force[0];
+          local_lift_force += force[1];
         }
       }
     }
   }
 
-  // Sum the drag and lift forces across all processes.
-  lift_force = Utilities::MPI::sum(lift_force, MPI_COMM_WORLD);
-  drag_force = Utilities::MPI::sum(drag_force, MPI_COMM_WORLD);
+  // Sum all the forces contributions that have been computed by each process in parallel
+  lift_force = Utilities::MPI::sum(local_lift_force, MPI_COMM_WORLD);
+  drag_force = Utilities::MPI::sum(local_drag_force, MPI_COMM_WORLD);
+}
 
-  // Print the results.
-  // pcout << "  Strong lift coefficient: " << get_lift(false)
-  //                          << std::endl;
-  // pcout << "  Strong drag coefficient: " << get_drag(false)
-  //                          << std::endl;
+void NSSolverStationary::print_lift() const 
+{
+  pcout << "===============================================" << std::endl;
+  pcout << "Lift force: " << lift_force << std::endl;
+}
+
+void NSSolverStationary::print_drag() const 
+{
+  pcout << "===============================================" << std::endl;
+  pcout << "Drag force: " << drag_force << std::endl;
 }

@@ -15,6 +15,9 @@ main(int argc, char *argv[])
   problem.setup();
   problem.solve_newton();
   problem.output();
+  problem.compute_lift_drag();
+  problem.print_lift();
+  problem.print_drag();
 
   return 0;
 }

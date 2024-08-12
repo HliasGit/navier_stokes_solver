@@ -373,7 +373,7 @@ protected:
   // Problem definition. ///////////////////////////////////////////////////////
 
   // Kinematic viscosity [m2/s]
-  double nu = 0.001;
+  double nu = 0.01;
 
   // Inlet velocity
   InletVelocity inlet_velocity;
@@ -442,7 +442,14 @@ protected:
   TrilinosWrappers::MPI::BlockVector evaluation_point;
 
   // Lift and Drag forces  ///////////////////////////////////////////////////////////
+public:
   void compute_lift_drag();
+
+  void print_lift() const;
+  void print_drag() const;
+protected:
+  double lift_force = 0.0;
+  double drag_force = 0.0;
 };
 
 #endif
