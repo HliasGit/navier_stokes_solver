@@ -373,7 +373,7 @@ protected:
   // Problem definition. ///////////////////////////////////////////////////////
 
   // Kinematic viscosity [m2/s]
-  double nu = 0.01;
+  double nu = 0.02;
 
   // Inlet velocity
   InletVelocity inlet_velocity;
@@ -445,11 +445,16 @@ protected:
 public:
   void compute_lift_drag();
 
-  void print_lift() const;
-  void print_drag() const;
+  double get_avg_inlet_velocity() const;
+  void print_lift_coeff();
+  void print_drag_coeff();
+  void compute_lift_coeff();
+  void compute_drag_coeff();
 protected:
   double lift_force = 0.0;
   double drag_force = 0.0;
+  double lift_coeff = 0.0;
+  double drag_coeff = 0.0;
 };
 
 #endif

@@ -488,12 +488,12 @@ void NSSolverStationary::solve_newton()
 {
   pcout << "===============================================" << std::endl;
 
-  const unsigned int n_max_iters = 50;
-  const double residual_tolerance = 1e-7;
+  const unsigned int n_max_iters = 10;
+  const double residual_tolerance = 1e-9;
   double target_Re = 1.0 / nu;
   bool first_iter = true;
 
-  for (double Re = 100.0; Re <= target_Re; Re += 300.0)
+  for (double Re = 50.0; Re <= target_Re; Re += 300.0)
   {
     pcout << "===============================================" << std::endl;
     pcout << "Solving for Re = " << Re << std::endl;
@@ -646,7 +646,7 @@ void NSSolverStationary::compute_lift_drag()
     for (unsigned int f = 0; f < cell->n_faces(); ++f)
     {
       if (cell->face(f)->at_boundary() &&
-          cell->face(f)->boundary_id() == 6)
+          cell->face(f)->boundary_id() == 10)
       {
         fe_face_values.reinit(cell, f);
 
@@ -665,11 +665,13 @@ void NSSolverStationary::compute_lift_drag()
 
           // Calculate the shear stress tensor (which is coplanar with the cylinder cross section)
           // it is the component of the force vector parallel to the cylinder cross section
+          // shear stress = nu * (grad u + grad u^T) - p * I
           shear_stress = velocity_gradient_loc[q];
           for (unsigned int i = 0; i < dim; i++)
           {
             for (unsigned int j = 0; j < dim; j++)
             {
+              // sum the transpose of the velocity gradient tensor
               shear_stress[i][j] += velocity_gradient_loc[q][j][i];
             }
           }
@@ -679,12 +681,15 @@ void NSSolverStationary::compute_lift_drag()
             shear_stress[i][i] -= pressure_loc[q];
           }
 
-          // compute the force acting on the cylinder
+          // compute the force vector acting on the cylinder along both spatial directions
+          // also invert the sign of the normal vector
           force = - shear_stress * negative_normal_vector *
                   fe_face_values.JxW(q);
 
           // Update drag and lift forces
+          // drag force is the component of the force vector parallel to the flow direction
           local_drag_force += force[0];
+          // lift force is the component of the force vector perpendicular to the flow direction
           local_lift_force += force[1];
         }
       }
@@ -696,14 +701,38 @@ void NSSolverStationary::compute_lift_drag()
   drag_force = Utilities::MPI::sum(local_drag_force, MPI_COMM_WORLD);
 }
 
-void NSSolverStationary::print_lift() const 
+double NSSolverStationary::get_avg_inlet_velocity() const
 {
-  pcout << "===============================================" << std::endl;
-  pcout << "Lift force: " << lift_force << std::endl;
+  // U_avg = 2 * U(0, H/2) / 3
+  return 2 * inlet_velocity.value(Point<dim>(0, 0.41 / 2.0)) / 3;
 }
 
-void NSSolverStationary::print_drag() const 
+void NSSolverStationary::compute_lift_coeff() 
+{
+  const double U_avg = get_avg_inlet_velocity();
+  // lift coefficient = 2 * lift_force / (U_avg * U_avg * D)
+  // where D is the diameter of the cylinder
+  lift_coeff = 2 * lift_force / (U_avg * U_avg * 0.1);
+}
+
+void NSSolverStationary::compute_drag_coeff() 
+{
+  const double U_avg = get_avg_inlet_velocity();
+  // drag coefficient = 2 * drag_force / (U_avg * U_avg * D)
+  // where D is the diameter of the cylinder
+  drag_coeff = 2 * drag_force / (U_avg * U_avg * 0.1);
+}
+
+void NSSolverStationary::print_lift_coeff() 
 {
   pcout << "===============================================" << std::endl;
-  pcout << "Drag force: " << drag_force << std::endl;
+  compute_lift_coeff();
+  pcout << "Lift force: " << lift_coeff << std::endl;
+}
+
+void NSSolverStationary::print_drag_coeff()  
+{
+  pcout << "===============================================" << std::endl;
+  compute_drag_coeff();
+  pcout << "Drag force: " << drag_coeff << std::endl;
 }
