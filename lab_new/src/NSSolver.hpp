@@ -61,6 +61,7 @@ public:
     {
       // in flow condition is: 4 * U_m * (H - y) / H^2
       values[0] = 4 * U_m * p[1] * (H - p[1]) / (H * H);
+      // values[0] = 4 * U_m * p[1] * (H - p[1]) * sin(M_PI * get_time() / 8) / (H * H);
 
       for (unsigned int i = 1; i < dim + 1; ++i)
         values[i] = 0.0;
@@ -72,13 +73,13 @@ public:
     {
       if (component == 0)
         return 4 * U_m * p[1] * (H - p[1]) / (H * H);
+        // return 4 * U_m * p[1] * (H - p[1]) * sin(M_PI * get_time() / 8) / (H * H);
       else
         return 0.0;
     }
     const double U_m = 0.3;
     const double H = 0.41;
   };
-
 
   // Function for the forcing term.
   class ForcingTerm : public Function<dim>
@@ -152,9 +153,9 @@ public:
       SolverFGMRES<TrilinosWrappers::MPI::Vector> solver_gmres_velocity(
           solver_control_velocity);
       solver_gmres_velocity.solve(*velocity_stiffness,
-                               dst.block(0),
-                               src.block(0),
-                               preconditioner_velocity);
+                                  dst.block(0),
+                                  src.block(0),
+                                  preconditioner_velocity);
 
       SolverControl solver_control_pressure(1000,
                                             1e-1);
@@ -209,9 +210,9 @@ public:
       SolverFGMRES<TrilinosWrappers::MPI::Vector> solver_gmres_velocity(
           solver_control_velocity);
       solver_gmres_velocity.solve(*velocity_stiffness,
-                               dst.block(0),
-                               src.block(0),
-                               preconditioner_velocity);
+                                  dst.block(0),
+                                  src.block(0),
+                                  preconditioner_velocity);
 
       tmp.reinit(src.block(1));
       B->vmult(tmp, dst.block(0));
@@ -371,8 +372,8 @@ public:
     mutable TrilinosWrappers::MPI::BlockVector tmp;
   };
 
-  public:
-    bool apply_first=true;
+public:
+  bool apply_first = true;
 
   // Constructor.
   NSSolver(const std::string &mesh_file_name_,
@@ -405,8 +406,9 @@ protected:
   assemble_system(bool first_iter);
 
   // Solve the tangent problem.
-  int
-  solve_system();
+  int solve_system();
+
+  double get_reynolds() const;
 
   // MPI parallel. /////////////////////////////////////////////////////////////
 
@@ -508,6 +510,22 @@ protected:
 
   // Evaluation point, used to find an optimal update in the Newton iteration
   TrilinosWrappers::MPI::BlockVector evaluation_point;
+
+  // Lift and Drag forces  ///////////////////////////////////////////////////////////
+public:
+  void compute_lift_drag();
+
+  double get_avg_inlet_velocity() const;
+  void print_lift_coeff();
+  void print_drag_coeff();
+  void compute_lift_coeff();
+  void compute_drag_coeff();
+
+protected:
+  double lift_force = 0.0;
+  double drag_force = 0.0;
+  double lift_coeff = 0.0;
+  double drag_coeff = 0.0;
 };
 
 #endif

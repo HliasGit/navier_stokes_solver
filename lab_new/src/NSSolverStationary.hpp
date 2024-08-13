@@ -359,6 +359,8 @@ protected:
   void
   solve_system();
 
+  double get_reynolds() const;
+
   // MPI parallel. /////////////////////////////////////////////////////////////
 
   // Number of MPI processes.
@@ -450,6 +452,7 @@ public:
   void print_drag_coeff();
   void compute_lift_coeff();
   void compute_drag_coeff();
+
 protected:
   double lift_force = 0.0;
   double drag_force = 0.0;

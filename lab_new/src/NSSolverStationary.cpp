@@ -566,6 +566,11 @@ void NSSolverStationary::solve_newton()
   pcout << "===============================================" << std::endl;
 }
 
+double NSSolverStationary::get_reynolds() const
+{
+  return get_avg_inlet_velocity() * 0.1 / nu;
+} 
+
 void NSSolverStationary::output() const
 {
   pcout << "===============================================" << std::endl;
@@ -727,12 +732,12 @@ void NSSolverStationary::print_lift_coeff()
 {
   pcout << "===============================================" << std::endl;
   compute_lift_coeff();
-  pcout << "Lift force: " << lift_coeff << std::endl;
+  pcout << "Lift coefficient: " << lift_coeff << std::endl;
 }
 
 void NSSolverStationary::print_drag_coeff()  
 {
   pcout << "===============================================" << std::endl;
   compute_drag_coeff();
-  pcout << "Drag force: " << drag_coeff << std::endl;
+  pcout << "Drag coefficient: " << drag_coeff << std::endl;
 }
