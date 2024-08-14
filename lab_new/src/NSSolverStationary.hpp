@@ -424,6 +424,8 @@ protected:
   void
   solve_system();
 
+  double get_reynolds() const;
+
   // MPI parallel. /////////////////////////////////////////////////////////////
 
   // Number of MPI processes.
@@ -513,7 +515,20 @@ protected:
   TrilinosWrappers::MPI::BlockVector evaluation_point;
 
   // Lift and Drag forces  ///////////////////////////////////////////////////////////
+public:
   void compute_lift_drag();
+
+  double get_avg_inlet_velocity() const;
+  void print_lift_coeff();
+  void print_drag_coeff();
+  void compute_lift_coeff();
+  void compute_drag_coeff();
+
+protected:
+  double lift_force = 0.0;
+  double drag_force = 0.0;
+  double lift_coeff = 0.0;
+  double drag_coeff = 0.0;
 };
 
 #endif

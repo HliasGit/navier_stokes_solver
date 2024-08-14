@@ -6,7 +6,7 @@ main(int argc, char *argv[])
 {
   Utilities::MPI::MPI_InitFinalize mpi_init(argc, argv);
 
-  const std::string  mesh_file_name  = "../mesh/2dMesh.msh";
+  const std::string  mesh_file_name  = "../mesh/2dMeshCylinder.msh";
   const unsigned int degree_velocity = 2;
   const unsigned int degree_pressure = 1;
 
@@ -15,6 +15,9 @@ main(int argc, char *argv[])
   problem.setup();
   problem.solve_newton();
   problem.output();
+  problem.compute_lift_drag();
+  problem.print_lift_coeff();
+  problem.print_drag_coeff();
 
   return 0;
 }
