@@ -1,4 +1,6 @@
 #include "NSSolver.hpp"
+#include <sstream>
+#include <iomanip>
 
 void NSSolver::setup()
 {
@@ -469,6 +471,7 @@ void NSSolver::assemble_system(bool first_iter)
                                                  {true, true, false}));
 
     boundary_functions[6] = &zero_function;
+    boundary_functions[10] = &zero_function;
     VectorTools::interpolate_boundary_values(dof_handler,
                                              boundary_functions,
                                              boundary_values,
@@ -491,15 +494,15 @@ int NSSolver::solve_system()
                             pressure_mass.block(1, 1),
                             jacobian_matrix.block(1, 0));
 
-  double alpha = 0.5;
-  PreconditionaSIMPLE preconditioner_asimple;
-  preconditioner_asimple.initialize(jacobian_matrix.block(0, 0),
-                                    jacobian_matrix.block(1, 0),
-                                    jacobian_matrix.block(0, 1),
-                                    solution_owned,
-                                    alpha);
+  // double alpha = 0.5;
+  // PreconditionaSIMPLE preconditioner_asimple;
+  // preconditioner_asimple.initialize(jacobian_matrix.block(0, 0),
+  //                                   jacobian_matrix.block(1, 0),
+  //                                   jacobian_matrix.block(0, 1),
+  //                                   solution_owned,
+  //                                   alpha);
 
-  solver.solve(jacobian_matrix, delta_owned, residual_vector, preconditioner_asimple);
+  solver.solve(jacobian_matrix, delta_owned, residual_vector, preconditioner);
   pcout << "   " << solver_control.last_step() << " GMRES iterations"
         << std::endl;
   return solver_control.last_step();
@@ -514,7 +517,7 @@ void NSSolver::solve_newton()
   double target_Re = 1.0 / nu;
   bool first_iter = true;
 
-  for (double Re = 10.0; Re <= target_Re; Re += 240)
+  for (double Re = 10.0; Re <= target_Re; Re += 20)
   {
     pcout << "===============================================" << std::endl;
     nu = 1.0 / Re;
@@ -669,6 +672,11 @@ void NSSolver::solve()
     compute_lift_drag();
     print_lift_coeff();
     print_drag_coeff();
+    // only root process needs to write the coefficients to a file
+    if (mpi_rank == 0)
+    {
+      write_lift_drag_to_file();
+    }
 
     pcout << std::endl;
   }
@@ -809,4 +817,48 @@ void NSSolver::print_drag_coeff()
   pcout << "===============================================" << std::endl;
   compute_drag_coeff();
   pcout << "Drag coefficient: " << drag_coeff << std::endl;
+}
+
+void NSSolver::write_lift_drag_to_file() const
+{
+  // get Reynolds number, which is part of the file name
+  double reynolds_number = get_reynolds();
+
+  // convert the double value to a string with precision
+  std::ostringstream file_stream;
+  file_stream << "../lift_drag_data/drag_coefficient_" << std::fixed << std::setprecision(2) << reynolds_number << ".txt";
+
+  // Create the filename string
+  std::string drag_filename = file_stream.str();
+
+  std::ofstream drag_file(drag_filename, std::ios::app);
+  if (drag_file.is_open())
+  {
+    drag_file << drag_coeff << std::endl;
+    drag_file.close();
+  }
+  else
+  {
+    std::cerr << "Failed to open the file: " << drag_filename << std::endl;
+  }
+
+  // Clear the stream for reuse, both contents and error flags
+  file_stream.str("");
+  file_stream.clear();
+
+  file_stream << "../lift_drag_data/lift_coefficient_" << std::fixed << std::setprecision(2) << reynolds_number << ".txt";
+
+  // Create the filename string
+  std::string lift_filename = file_stream.str();
+
+  std::ofstream lift_file(lift_filename, std::ios::app);
+  if (lift_file.is_open())
+  {
+    lift_file << lift_coeff << std::endl;
+    lift_file.close();
+  }
+  else
+  {
+    std::cerr << "Failed to open the file: " << lift_filename << std::endl;
+  }
 }

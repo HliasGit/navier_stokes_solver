@@ -75,7 +75,7 @@ public:
       else
         return 0.0;
     }
-    const double U_m = 0.4;
+    const double U_m = 0.3;
     const double H = 0.41;
   };
 

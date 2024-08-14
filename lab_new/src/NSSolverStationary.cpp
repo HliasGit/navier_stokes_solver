@@ -454,6 +454,7 @@ void NSSolverStationary::assemble_system(bool first_iter, int vel)
                                                  {true, true, false}));
 
     boundary_functions[6] = &zero_function;
+    boundary_functions[10] = &zero_function;
     VectorTools::interpolate_boundary_values(dof_handler,
                                              boundary_functions,
                                              boundary_values,
@@ -497,14 +498,14 @@ void NSSolverStationary::solve_newton()
   const double residual_tolerance = 1e-9;
   double target_Re = 1.0 / nu;
   bool first_iter = true;
-  int vel_lim = 3;
+  double vel_lim = 3.0;
 
   for (double Re = 50.0; Re <= target_Re; Re += 50.0)
   {
     for (int vel = 0; vel < vel_lim; vel++)
     {
     pcout << "===============================================" << std::endl;
-    pcout << "Solving for Re = " << Re << std::endl;
+    pcout << "Solving for Re = " << get_reynolds() << std::endl;
     nu = 1.0 / Re;
 
     unsigned int n_iter = 0;

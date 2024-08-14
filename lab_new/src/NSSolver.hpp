@@ -523,6 +523,7 @@ public:
   void print_drag_coeff();
   void compute_lift_coeff();
   void compute_drag_coeff();
+  void write_lift_drag_to_file() const;
 
 protected:
   double lift_force = 0.0;
