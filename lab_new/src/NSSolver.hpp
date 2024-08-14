@@ -73,7 +73,7 @@ public:
     {
       if (component == 0)
         return 4 * U_m * p[1] * (H - p[1]) / (H * H);
-        // return 4 * U_m * p[1] * (H - p[1]) * sin(M_PI * get_time() / 8) / (H * H);
+      // return 4 * U_m * p[1] * (H - p[1]) * sin(M_PI * get_time() / 8) / (H * H);
       else
         return 0.0;
     }
@@ -277,6 +277,7 @@ public:
       // assemble approximate of Schur complement as S = B * D_inv_vector * B^T
       B_neg_matrix->mmult(S_neg_matrix, *B_t_matrix, D_inv_vector);
 
+      // initialize preconditioners with corresponding matrices
       preconditioner_F.initialize(F_);
       preconditioner_S.initialize(S_neg_matrix);
     }
@@ -292,18 +293,20 @@ public:
       // compute multiplication [F^{-1} 0; 0 I] * src
       // solve linear system associated with F^{-1} * src.block(0) and store result in dst.block(0)
 
-      SolverControl solver_control_F(10000001,
-                                     1e-1 * src.block(0).l2_norm());
-      SolverGMRES<TrilinosWrappers::MPI::Vector> solver_F(
-          solver_control_F);
+      // SolverControl solver_control_F(10000001,
+      //                                1e-1 * src.block(0).l2_norm());
+      // SolverFGMRES<TrilinosWrappers::MPI::Vector> solver_F(
+      //     solver_control_F);
 
-      solver_F.solve(*F_matrix,
-                     dst.block(0),
-                     src.block(0),
-                     preconditioner_F);
+      // solver_F.solve(*F_matrix,
+      //                dst.block(0),
+      //                src.block(0),
+      //                preconditioner_F);
+
+      // std::cout << "Converged!" << std::endl;
 
       // // if do not want to use direct solver
-      // preconditioner_F.vmult(dst.block(0), src.block(0));
+      preconditioner_F.vmult(dst.block(0), src.block(0));
 
       // store src.block(1) in tmp.block(1)
       tmp.block(1) = src.block(1);
@@ -314,18 +317,17 @@ public:
 
       // compute multiplication by [I 0; 0 -S^{-1}]
       // solve linear system associated with the approximate Schur complement
-
-      SolverControl solver_control_S(10000000,
-                                     1e-1 * tmp.block(1).l2_norm());
-      SolverGMRES<TrilinosWrappers::MPI::Vector> solver_S(
-          solver_control_S);
-      solver_S.solve(S_neg_matrix,
-                     dst.block(1),
-                     tmp.block(1),
-                     preconditioner_S);
+      // SolverControl solver_control_S(10000000,
+      //                                1e-1 * tmp.block(1).l2_norm());
+      // SolverFGMRES<TrilinosWrappers::MPI::Vector> solver_S(
+      //     solver_control_S);
+      // solver_S.solve(S_neg_matrix,
+      //                dst.block(1),
+      //                tmp.block(1),
+      //                preconditioner_S);
 
       // // if do not want to use direct solver
-      // preconditioner_S.vmult(dst.block(1), tmp.block(1));
+      preconditioner_S.vmult(dst.block(1), tmp.block(1));
 
       // compute multiplication by [D 0; 0 I*1/alpha]
       dst.block(0).scale(D_vector);
@@ -357,10 +359,10 @@ public:
     double alpha;
 
     // Preconditioner used to approximate F^{-1}
-    TrilinosWrappers::PreconditionSSOR preconditioner_F;
+    TrilinosWrappers::PreconditionILU preconditioner_F;
 
     // Preconditioner used to approximate S^{-1}
-    TrilinosWrappers::PreconditionSSOR preconditioner_S;
+    TrilinosWrappers::PreconditionILU preconditioner_S;
 
     // B matrix.
     const TrilinosWrappers::SparseMatrix *B_neg_matrix;
@@ -368,7 +370,8 @@ public:
     // B transpose matrix, needed to compute S
     const TrilinosWrappers::SparseMatrix *B_t_matrix;
 
-    // Temporary vector.
+    // Temporary vector for intermediate results
+    // mutable type is used for const-correctness 
     mutable TrilinosWrappers::MPI::BlockVector tmp;
   };
 

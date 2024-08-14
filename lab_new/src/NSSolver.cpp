@@ -425,8 +425,7 @@ void NSSolver::assemble_system(bool first_iter)
               cell_rhs(i) -=
                   p_out *
                   scalar_product(fe_face_values.normal_vector(q),
-                                 fe_face_values[velocity].value(i,
-                                                                q)) *
+                                 fe_face_values[velocity].value(i, q)) *
                   fe_face_values.JxW(q);
             }
           }
@@ -492,15 +491,15 @@ int NSSolver::solve_system()
                             pressure_mass.block(1, 1),
                             jacobian_matrix.block(1, 0));
 
-  // double alpha = 0.5;
-  // PreconditionaSIMPLE preconditioner_asimple;
-  // preconditioner_asimple.initialize(jacobian_matrix.block(0, 0),
-  //                                   jacobian_matrix.block(1, 0),
-  //                                   jacobian_matrix.block(0, 1),
-  //                                   delta_owned,
-  //                                   alpha);
+  double alpha = 0.5;
+  PreconditionaSIMPLE preconditioner_asimple;
+  preconditioner_asimple.initialize(jacobian_matrix.block(0, 0),
+                                    jacobian_matrix.block(1, 0),
+                                    jacobian_matrix.block(0, 1),
+                                    solution_owned,
+                                    alpha);
 
-  solver.solve(jacobian_matrix, delta_owned, residual_vector, preconditioner);
+  solver.solve(jacobian_matrix, delta_owned, residual_vector, preconditioner_asimple);
   pcout << "   " << solver_control.last_step() << " GMRES iterations"
         << std::endl;
   return solver_control.last_step();
@@ -590,7 +589,7 @@ void NSSolver::solve_newton()
 double NSSolver::get_reynolds() const
 {
   return get_avg_inlet_velocity() * 0.1 / nu;
-} 
+}
 
 void NSSolver::output(const unsigned int &time_step) const
 {
@@ -704,8 +703,8 @@ void NSSolver::compute_lift_drag()
   std::vector<Tensor<2, dim>> velocity_gradient_loc(n_q_face);
   std::vector<double> pressure_loc(n_q_face);
 
-  // declare shear stress tensor and force tensor
-  Tensor<2, dim> shear_stress;
+  // declare viscous stress tensor and force tensor
+  Tensor<2, dim> viscous_stress;
   Tensor<1, dim> force;
 
   pcout << "Debug " << std::endl;
@@ -735,27 +734,27 @@ void NSSolver::compute_lift_drag()
           // respect to the one in the provided formulae
           const Tensor<1, dim> &negative_normal_vector = fe_face_values.normal_vector(q);
 
-          // Calculate the shear stress tensor (which is coplanar with the cylinder cross section)
+          // Calculate the viscous stress tensor (which is coplanar with the cylinder cross section)
           // it is the component of the force vector parallel to the cylinder cross section
-          // shear stress = nu * (grad u + grad u^T) - p * I
-          shear_stress = velocity_gradient_loc[q];
+          // viscous stress = nu * (grad u + grad u^T) - p * I
+          viscous_stress = velocity_gradient_loc[q];
           for (unsigned int i = 0; i < dim; i++)
           {
             for (unsigned int j = 0; j < dim; j++)
             {
               // sum the transpose of the velocity gradient tensor
-              shear_stress[i][j] += velocity_gradient_loc[q][j][i];
+              viscous_stress[i][j] += velocity_gradient_loc[q][j][i];
             }
           }
-          shear_stress *= nu;
+          viscous_stress *= nu;
           for (unsigned int i = 0; i < dim; i++)
           {
-            shear_stress[i][i] -= pressure_loc[q];
+            viscous_stress[i][i] -= pressure_loc[q];
           }
 
           // compute the force vector acting on the cylinder along both spatial directions
           // also invert the sign of the normal vector
-          force = -shear_stress * negative_normal_vector *
+          force = -viscous_stress * negative_normal_vector *
                   fe_face_values.JxW(q);
 
           // Update drag and lift forces
