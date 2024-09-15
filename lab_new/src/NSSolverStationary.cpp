@@ -433,12 +433,12 @@ void NSSolverStationary::assemble_system(bool first_iter, int vel)
 
     if (first_iter)
     {
-      if(vel == 0)
-      boundary_functions[7] = &starting_inlet_velocity;
-      if(vel == 1)
-      boundary_functions[7] = &middle_inlet_velocity;
-      if(vel == 2)
-      boundary_functions[7] = &inlet_velocity;
+      if (vel == 0)
+        boundary_functions[7] = &starting_inlet_velocity;
+      if (vel == 1)
+        boundary_functions[7] = &middle_inlet_velocity;
+      if (vel == 2)
+        boundary_functions[7] = &inlet_velocity;
     }
     else
     {
@@ -496,91 +496,92 @@ void NSSolverStationary::solve_newton()
 
   const unsigned int n_max_iters = 10;
   const double residual_tolerance = 1e-9;
-  double target_Re = 1.0 / nu;
+  double target_Re = 10.0;
   bool first_iter = true;
   double vel_lim = 3.0;
+  pcout << "Target Re = " << target_Re << std::endl;
 
-  for (double Re = 50.0; Re <= target_Re; Re += 50.0)
+  for (double Re = 10.0; Re <= target_Re; Re += 10.0)
   {
-    for (int vel = 0; vel < vel_lim; vel++)
-    {
+    // for (int vel = 0; vel < vel_lim; vel++)
+    // {
     pcout << "===============================================" << std::endl;
-    pcout << "Solving for Re = " << get_reynolds() << std::endl;
     nu = 1.0 / Re;
+    pcout << "Solving for nu = " << nu << ", Re = " << get_reynolds() << std::endl;
 
     unsigned int n_iter = 0;
     double residual_norm = residual_tolerance + 1;
     double prev_residual;
-      while (n_iter < n_max_iters && residual_norm > residual_tolerance)
+    while (n_iter < n_max_iters && residual_norm > residual_tolerance)
+    {
+      if (first_iter)
       {
-        if (first_iter)
-        {
-          if(vel>=vel_lim){
-            first_iter = false;
-          }
-          assemble_system(n_iter == 0 ? true : false, vel);
-        }
-        else
-        {
-          assemble_system(false, vel);
-        }
-
-        residual_norm = residual_vector.l2_norm();
-
-        prev_residual = n_iter == 0 ? residual_norm + 1 : prev_residual;
-
-        pcout << "Newton iteration " << n_iter << "/" << n_max_iters
-              << " - ||r|| = " << std::scientific << std::setprecision(6)
-              << residual_norm << std::flush;
-
-        // We actually solve the system only if the residual is larger than the
-        // tolerance.
-        if (residual_norm > residual_tolerance)
-        {
-          solve_system();
-
-          evaluation_point = solution;
-
-          // Update the solution
-          for (double alpha = 1; alpha > 1e-12; alpha *= 0.1)
-          {
-            solution_owned = evaluation_point;
-            solution_owned.add(alpha, delta_owned);
-            solution = solution_owned;
-
-            assemble_system(false, vel);
-            residual_norm = residual_vector.l2_norm();
-
-            pcout << "  Evaluating alpha=" << alpha << ", ||r||=" << residual_norm << std::endl;
-
-            if (residual_norm < prev_residual)
-              break;
-          }
-
-          prev_residual = residual_norm;
-        }
-        else
-        {
-          // newton method already converged for the current Re number, print tolerance and output
-          pcout << " < tolerance" << std::endl;
-          output();
-          break;
-        }
-        //output();
-        ++n_iter;
+        // if(vel>=vel_lim){
+        first_iter = false;
+        // }
+        assemble_system(n_iter == 0 ? true : false, 0);
+      }
+      else
+      {
+        assemble_system(false, 0);
       }
 
-      output();
+      residual_norm = residual_vector.l2_norm();
+
+      prev_residual = n_iter == 0 ? residual_norm + 1 : prev_residual;
+
+      pcout << "Newton iteration " << n_iter << "/" << n_max_iters
+            << " - ||r|| = " << std::scientific << std::setprecision(6)
+            << residual_norm << std::flush;
+
+      // We actually solve the system only if the residual is larger than the
+      // tolerance.
+      if (residual_norm > residual_tolerance)
+      {
+        solve_system();
+
+        evaluation_point = solution;
+
+        // Update the solution
+        for (double alpha = 1; alpha > 1e-12; alpha *= 0.1)
+        {
+          solution_owned = evaluation_point;
+          solution_owned.add(alpha, delta_owned);
+          solution = solution_owned;
+
+          assemble_system(false, 0);
+          residual_norm = residual_vector.l2_norm();
+
+          pcout << "  Evaluating alpha=" << alpha << ", ||r||=" << residual_norm << std::endl;
+
+          if (residual_norm < prev_residual)
+            break;
+        }
+
+        prev_residual = residual_norm;
+      }
+      else
+      {
+        // newton method already converged for the current Re number, print tolerance and output
+        pcout << " < tolerance" << std::endl;
+        output();
+        break;
+      }
+      // output();
+      ++n_iter;
     }
-    vel_lim = 1;
-  }
-  pcout << "===============================================" << std::endl;
+
+    output();
+  // }
+  vel_lim = 1;
+}
+pcout << "===============================================" << std::endl;
 }
 
 double NSSolverStationary::get_reynolds() const
 {
   return get_avg_inlet_velocity() * 0.1 / nu;
-} 
+}
 
 void NSSolverStationary::output() const
 {
@@ -653,7 +654,7 @@ void NSSolverStationary::compute_lift_drag()
   Tensor<1, dim> force;
 
   pcout << "Debug " << std::endl;
-  
+
   for (const auto &cell : dof_handler.active_cell_iterators())
   {
     if (!cell->is_locally_owned())
@@ -675,7 +676,7 @@ void NSSolverStationary::compute_lift_drag()
         for (unsigned int q = 0; q < n_q_face; ++q)
         {
           // Get the normal vector to the cylinder surface
-          // note that the normal vector is pointing in the opposite direction with 
+          // note that the normal vector is pointing in the opposite direction with
           // respect to the one in the provided formulae
           const Tensor<1, dim> &negative_normal_vector = fe_face_values.normal_vector(q);
 
@@ -699,7 +700,7 @@ void NSSolverStationary::compute_lift_drag()
 
           // compute the force vector acting on the cylinder along both spatial directions
           // also invert the sign of the normal vector
-          force = - shear_stress * negative_normal_vector *
+          force = -shear_stress * negative_normal_vector *
                   fe_face_values.JxW(q);
 
           // Update drag and lift forces
@@ -723,7 +724,7 @@ double NSSolverStationary::get_avg_inlet_velocity() const
   return 2 * inlet_velocity.value(Point<dim>(0, 0.41 / 2.0)) / 3;
 }
 
-void NSSolverStationary::compute_lift_coeff() 
+void NSSolverStationary::compute_lift_coeff()
 {
   const double U_avg = get_avg_inlet_velocity();
   // lift coefficient = 2 * lift_force / (U_avg * U_avg * D)
@@ -731,7 +732,7 @@ void NSSolverStationary::compute_lift_coeff()
   lift_coeff = 2 * lift_force / (U_avg * U_avg * 0.1);
 }
 
-void NSSolverStationary::compute_drag_coeff() 
+void NSSolverStationary::compute_drag_coeff()
 {
   const double U_avg = get_avg_inlet_velocity();
   // drag coefficient = 2 * drag_force / (U_avg * U_avg * D)
@@ -739,14 +740,14 @@ void NSSolverStationary::compute_drag_coeff()
   drag_coeff = 2 * drag_force / (U_avg * U_avg * 0.1);
 }
 
-void NSSolverStationary::print_lift_coeff() 
+void NSSolverStationary::print_lift_coeff()
 {
   pcout << "===============================================" << std::endl;
   compute_lift_coeff();
   pcout << "Lift coefficient: " << lift_coeff << std::endl;
 }
 
-void NSSolverStationary::print_drag_coeff()  
+void NSSolverStationary::print_drag_coeff()
 {
   pcout << "===============================================" << std::endl;
   compute_drag_coeff();

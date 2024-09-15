@@ -440,7 +440,7 @@ protected:
   // Problem definition. ///////////////////////////////////////////////////////
 
   // Kinematic viscosity [m2/s]
-  double nu = 0.01;
+  double nu = 0.1;
 
   // Inlet velocity
   StartingInletVelocity starting_inlet_velocity;
