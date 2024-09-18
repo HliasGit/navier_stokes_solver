@@ -47,73 +47,10 @@ public:
   // axis). If we only return one component, however, we may get an error
   // message due to this function being incompatible with the finite element
   // space.
-  class StartingInletVelocity : public Function<dim>
-  {
-  public:
-    StartingInletVelocity()
-        : Function<dim>(dim + 1)
-    {
-    }
-
-    virtual void
-    vector_value(const Point<dim> &p,
-                 Vector<double> &values) const override
-    {
-      // in flow condition is: 4 * U_m * (H - y) / H^2
-      values[0] = 4 * U_m * p[1] * (H - p[1]) / (H * H);
-
-      for (unsigned int i = 1; i < dim + 1; ++i)
-        values[i] = 0.0;
-    }
-
-    virtual double
-    value(const Point<dim> &p,
-          const unsigned int component = 0) const override
-    {
-      if (component == 0)
-        return 4 * U_m * p[1] * (H - p[1]) / (H * H);
-      else
-        return 0.0;
-    }
-    const double U_m = 0.3;
-    const double H = 0.41;
-  };
-
-  
-  class MiddleInletVelocity : public Function<dim>
-  {
-  public:
-    MiddleInletVelocity()
-        : Function<dim>(dim + 1)
-    {
-    }
-
-    virtual void
-    vector_value(const Point<dim> &p,
-                 Vector<double> &values) const override
-    {
-      // in flow condition is: 4 * U_m * (H - y) / H^2
-      values[0] = 4 * U_m * p[1] * (H - p[1]) / (H * H);
-
-      for (unsigned int i = 1; i < dim + 1; ++i)
-        values[i] = 0.0;
-    }
-
-    virtual double
-    value(const Point<dim> &p,
-          const unsigned int component = 0) const override
-    {
-      if (component == 0)
-        return 4 * U_m * p[1] * (H - p[1]) / (H * H);
-      else
-        return 0.0;
-    }
-    const double U_m = 1.0;
-    const double H = 0.41;
-  };
-
   class InletVelocity : public Function<dim>
   {
+  private: 
+    double u = 0.1;
   public:
     InletVelocity()
         : Function<dim>(dim + 1)
@@ -125,7 +62,7 @@ public:
                  Vector<double> &values) const override
     {
       // in flow condition is: 4 * U_m * (H - y) / H^2
-      values[0] = 4 * U_m * p[1] * (H - p[1]) / (H * H);
+      values[0] = 4 * u * p[1] * (H - p[1]) / (H * H);
 
       for (unsigned int i = 1; i < dim + 1; ++i)
         values[i] = 0.0;
@@ -136,11 +73,31 @@ public:
           const unsigned int component = 0) const override
     {
       if (component == 0)
-        return 4 * U_m * p[1] * (H - p[1]) / (H * H);
+        return 4 * u * p[1] * (H - p[1]) / (H * H);
       else
         return 0.0;
     }
-    const double U_m = 0.8;
+
+    double getVelocity() {
+      return u;
+    }
+
+    bool incrementVelocity(double re) {
+      if (u == U_m)
+        return true;
+
+      //u += 1.0 / re;
+      u += 0.1;
+
+      if (re == 0.0)
+        u = 0.01;
+
+      if (u > U_m)
+        u = U_m;
+
+      return false;
+    }
+    const double U_m = 1.0;
     const double H = 0.41;
   };
 
@@ -415,10 +372,13 @@ public:
   void
   output() const;
 
+  bool 
+  decreaseViscosity();
+
 protected:
   // Assemble the tangent problem.
   void
-  assemble_system(bool first_iter, int vel);
+  assemble_system(bool first_iter);
 
   // Solve the tangent problem.
   void
@@ -440,13 +400,8 @@ protected:
   // Problem definition. ///////////////////////////////////////////////////////
 
   // Kinematic viscosity [m2/s]
-  double nu = 0.01;
-
-  // Inlet velocity
-  StartingInletVelocity starting_inlet_velocity;
-
-  //Middle one
-  MiddleInletVelocity middle_inlet_velocity;
+  double objNu = 0.005;
+  double nu = 0.02;
 
   // Inlet velocity
   InletVelocity inlet_velocity;
