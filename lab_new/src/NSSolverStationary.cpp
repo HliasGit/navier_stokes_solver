@@ -433,11 +433,6 @@ void NSSolverStationary::assemble_system(bool first_iter)
 
     if (first_iter)
     {
-      if(vel == 0)
-      boundary_functions[7] = &starting_inlet_velocity;
-      if(vel == 1)
-      boundary_functions[7] = &middle_inlet_velocity;
-      if(vel == 2)
       boundary_functions[7] = &inlet_velocity;
     }
     else
