@@ -400,7 +400,6 @@ protected:
   // Problem definition. ///////////////////////////////////////////////////////
 
   // Kinematic viscosity [m2/s]
-  double objNu = 0.005;
   double nu = 0.02;
 
   // Inlet velocity
