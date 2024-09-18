@@ -510,10 +510,15 @@ void NSSolverStationary::solve_newton()
         unsigned int n_iter = 0;
         double residual_norm = residual_tolerance + 1;
         double prev_residual;
+
+        // Again a first iter
+        first_iter = true;
+
         while (n_iter < n_max_iters && residual_norm > residual_tolerance)
         {
           if (first_iter)
           {
+            first_iter = false;
             assemble_system(n_iter == 0 ? true : false);
           }
           else
