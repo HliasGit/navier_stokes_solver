@@ -461,7 +461,24 @@ void NSSolverStationary::assemble_system(bool first_iter)
   }
 }
 
-int NSSolverStationary::solve_system()
+int NSSolverStationary::solve_system_diagonal()
+{
+  SolverControl solver_control(20000, 1e-12);
+
+  SolverFGMRES<TrilinosWrappers::MPI::BlockVector> solver(solver_control);
+
+  PreconditionBlockDiagonal preconditioner;
+  preconditioner.initialize(jacobian_matrix.block(0, 0),
+                            pressure_mass.block(1, 1));
+
+  solver.solve(jacobian_matrix, delta_owned, residual_vector, preconditioner);
+  pcout << "   " << solver_control.last_step() << " GMRES iterations"
+        << std::endl;
+
+  return solver_control.last_step();
+}
+
+int NSSolverStationary::solve_system_triangular()
 {
   SolverControl solver_control(20000, 1e-12);
 
@@ -472,14 +489,6 @@ int NSSolverStationary::solve_system()
                             pressure_mass.block(1, 1),
                             jacobian_matrix.block(1, 0));
 
-  // double alpha = 0.5;
-  // PreconditionaSIMPLE preconditioner_asimple;
-  // preconditioner_asimple.initialize(jacobian_matrix.block(0, 0),
-  //                                   jacobian_matrix.block(1, 0),
-  //                                   jacobian_matrix.block(0, 1),
-  //                                   delta_owned,
-  //                                   alpha);
-
   solver.solve(jacobian_matrix, delta_owned, residual_vector, preconditioner);
   pcout << "   " << solver_control.last_step() << " GMRES iterations"
         << std::endl;
@@ -487,18 +496,39 @@ int NSSolverStationary::solve_system()
   return solver_control.last_step();
 }
 
-void NSSolverStationary::solve_newton()
+int NSSolverStationary::solve_system_simple()
+{
+  SolverControl solver_control(20000, 1e-12);
+
+  SolverFGMRES<TrilinosWrappers::MPI::BlockVector> solver(solver_control);
+
+  double alpha = 0.7;
+  PreconditionaSIMPLE preconditioner_asimple;
+  preconditioner_asimple.initialize(jacobian_matrix.block(0, 0),
+                                    jacobian_matrix.block(1, 0),
+                                    jacobian_matrix.block(0, 1),
+                                    delta_owned,
+                                    alpha);
+
+  solver.solve(jacobian_matrix, delta_owned, residual_vector, preconditioner_asimple);
+  pcout << "   " << solver_control.last_step() << " GMRES iterations"
+        << std::endl;
+
+  return solver_control.last_step();
+}
+
+void NSSolverStationary::solve_newton(int solver)
 {
   pcout << "===============================================" << std::endl;
 
   const unsigned int n_max_iters = 10;
   const double residual_tolerance = 1e-9;
-  double target_Re = 10.0;
+  double target_Re = 1.0;
   bool first_iter = true;
   bool inlet_reached = false;
   pcout << "Target Re = " << target_Re << std::endl;
 
-  for (double Re = 10.0; Re <= target_Re; Re += 10.0)
+  for (double Re = 1.0; Re <= target_Re; Re += 1.0)
   {
     // for (int vel = 0; vel < vel_lim; vel++)
     // {
@@ -541,7 +571,24 @@ void NSSolverStationary::solve_newton()
           // tolerance.
           if (residual_norm > residual_tolerance)
           {
-            GMRES_iter = solve_system();
+            switch (solver)
+            {
+            case 0:
+              GMRES_iter = solve_system_diagonal();
+              break;
+
+            case 1:
+              GMRES_iter = solve_system_triangular();
+              break;
+
+            case 2:
+              GMRES_iter = solve_system_simple();
+              break;
+            
+            default:
+              pcout << "Not a valid solver" << std::endl;
+              break;
+            }
 
             if(GMRES_iter == 0)
               break;           

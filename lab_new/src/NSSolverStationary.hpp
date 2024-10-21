@@ -31,6 +31,7 @@
 
 #include <fstream>
 #include <iostream>
+#include <time.h>
 
 using namespace dealii;
 
@@ -87,7 +88,7 @@ public:
         return true;
 
       //u += 1.0 / re;
-      u += 0.1;
+      u += 0.3;
 
       if (re == 0.0)
         u = 0.01;
@@ -249,7 +250,9 @@ public:
       // compute diag(F) and diag(F)^{-1} and save it to the respective vector
       for (unsigned int i : D_vector.locally_owned_elements())
       {
-        const double tmp = F_matrix->diag_element(i);
+        double tmp = F_matrix->diag_element(i);
+        if(tmp < 0.000000001)
+            tmp = 0.000000001;
         D_vector[i] = tmp;
         D_inv_vector[i] = 1.0 / tmp;
       }
@@ -296,7 +299,7 @@ public:
       // solve linear system associated with the approximate Schur complement
 
       SolverControl solver_control_S(10000000,
-                                     1e-2 * tmp.block(1).l2_norm());
+                                     1e-4 * tmp.block(1).l2_norm());
       SolverGMRES<TrilinosWrappers::MPI::Vector> solver_S(
           solver_control_S);
       solver_S.solve(S_neg_matrix,
@@ -366,7 +369,7 @@ public:
 
   // Solve the problem using Newton's method.
   void
-  solve_newton();
+  solve_newton(int solver);
 
   // Output.
   void
@@ -382,7 +385,13 @@ protected:
 
   // Solve the tangent problem.
   int
-  solve_system();
+  solve_system_diagonal();
+
+  int
+  solve_system_triangular();
+  
+  int
+  solve_system_simple();
 
   double get_reynolds() const;
 
