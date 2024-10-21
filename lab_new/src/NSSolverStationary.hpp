@@ -381,7 +381,7 @@ protected:
   assemble_system(bool first_iter);
 
   // Solve the tangent problem.
-  void
+  int
   solve_system();
 
   double get_reynolds() const;

@@ -461,7 +461,7 @@ void NSSolverStationary::assemble_system(bool first_iter)
   }
 }
 
-void NSSolverStationary::solve_system()
+int NSSolverStationary::solve_system()
 {
   SolverControl solver_control(20000, 1e-12);
 
@@ -483,6 +483,8 @@ void NSSolverStationary::solve_system()
   solver.solve(jacobian_matrix, delta_owned, residual_vector, preconditioner);
   pcout << "   " << solver_control.last_step() << " GMRES iterations"
         << std::endl;
+
+  return solver_control.last_step();
 }
 
 void NSSolverStationary::solve_newton()
@@ -510,6 +512,7 @@ void NSSolverStationary::solve_newton()
         unsigned int n_iter = 0;
         double residual_norm = residual_tolerance + 1;
         double prev_residual;
+        int GMRES_iter = 0;
 
         // Again a first iter
         first_iter = true;
@@ -538,7 +541,10 @@ void NSSolverStationary::solve_newton()
           // tolerance.
           if (residual_norm > residual_tolerance)
           {
-            solve_system();
+            GMRES_iter = solve_system();
+
+            if(GMRES_iter == 0)
+              break;           
 
             evaluation_point = solution;
 
