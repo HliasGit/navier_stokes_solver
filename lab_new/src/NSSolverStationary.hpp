@@ -10,13 +10,18 @@
 #include <deal.II/dofs/dof_renumbering.h>
 #include <deal.II/dofs/dof_tools.h>
 
-#include <deal.II/fe/fe_simplex_p.h>
+#include <deal.II/fe/fe_q.h>
 #include <deal.II/fe/fe_system.h>
 #include <deal.II/fe/fe_values.h>
 #include <deal.II/fe/fe_values_extractors.h>
 #include <deal.II/fe/mapping_fe.h>
 
 #include <deal.II/grid/grid_in.h>
+#include <deal.II/grid/grid_out.h>
+#include <deal.II/grid/grid_generator.h>
+#include <deal.II/grid/grid_tools.h>
+#include <deal.II/grid/grid_refinement.h>
+#include <deal.II/numerics/data_out.h>
 
 #include <deal.II/lac/solver_cg.h>
 #include <deal.II/lac/solver_gmres.h>
@@ -31,6 +36,9 @@
 
 #include <fstream>
 #include <iostream>
+#include <vector>
+#include <cmath>
+
 
 using namespace dealii;
 
@@ -423,7 +431,7 @@ protected:
   const unsigned int degree_pressure;
 
   // Finite element space.
-  std::unique_ptr<FiniteElement<dim>> fe;
+  std::unique_ptr<FESystem<dim>> fe;
 
   // Quadrature formula.
   std::unique_ptr<Quadrature<dim>> quadrature;
