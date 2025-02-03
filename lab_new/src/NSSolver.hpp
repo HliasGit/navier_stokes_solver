@@ -11,13 +11,18 @@
 #include <deal.II/dofs/dof_tools.h>
 
 #include <deal.II/fe/fe_simplex_p.h>
+#include <deal.II/fe/fe_q.h>
 #include <deal.II/fe/fe_system.h>
 #include <deal.II/fe/fe_values.h>
 #include <deal.II/fe/fe_values_extractors.h>
 #include <deal.II/fe/mapping_fe.h>
 
 #include <deal.II/grid/grid_in.h>
+#include <deal.II/grid/grid_out.h>
+#include <deal.II/grid/grid_generator.h>
 #include <deal.II/grid/grid_tools.h>
+#include <deal.II/grid/grid_refinement.h>
+#include <deal.II/numerics/data_out.h>
 
 #include <deal.II/lac/solver_cg.h>
 #include <deal.II/lac/solver_gmres.h>
@@ -207,7 +212,7 @@ public:
           const TrilinosWrappers::MPI::BlockVector &src) const
     {
       SolverControl solver_control_velocity(2000001,
-                                            1e-1 * src.block(0).l2_norm());
+                                            1e-4 * src.block(0).l2_norm());
       SolverFGMRES<TrilinosWrappers::MPI::Vector> solver_gmres_velocity(
           solver_control_velocity);
       solver_gmres_velocity.solve(*velocity_stiffness,
@@ -220,7 +225,7 @@ public:
       tmp.sadd(-1.0, src.block(1));
 
       SolverControl solver_control_pressure(2000000,
-                                            1e-1 * src.block(1).l2_norm());
+                                            1e-5 * src.block(1).l2_norm());
       SolverCG<TrilinosWrappers::MPI::Vector> solver_cg_pressure(
           solver_control_pressure);
       solver_cg_pressure.solve(*pressure_mass,
@@ -428,7 +433,7 @@ protected:
   // Problem definition. ///////////////////////////////////////////////////////
 
   // Kinematic viscosity [m2/s]
-  double nu = 0.1;
+  double nu = 1.0;
 
   // Inlet velocity
   InletVelocity inlet_velocity;
@@ -467,7 +472,7 @@ protected:
   const double delta_t;
 
   // Finite element space.
-  std::unique_ptr<FiniteElement<dim>> fe;
+  std::unique_ptr<FESystem<dim>> fe;
 
   // Quadrature formula.
   std::unique_ptr<Quadrature<dim>> quadrature;
