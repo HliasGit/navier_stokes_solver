@@ -11,7 +11,8 @@ void NSSolverStationary::setup()
     const Point<dim> bottom_left(0.0, 0.0);
     const Point<dim> top_right(2.2, 0.41);
     // Use a subdivision that gives reasonable resolution.
-    std::vector<unsigned int> subdivisions{300, 100};
+    // std::vector<unsigned int> subdivisions{300, 100};
+    std::vector<unsigned int> subdivisions{50, 20};
     GridGenerator::subdivided_hyper_rectangle(full_tria,
                                                 subdivisions,
                                                 bottom_left,
@@ -561,9 +562,10 @@ void NSSolverStationary::assemble_system(bool first_iter)
 
 int NSSolverStationary::solve_system()
 {
-  SolverControl solver_control(20000, 1e-12);
+  SolverControl solver_control(20000, 1e-6);
 
   SolverFGMRES<TrilinosWrappers::MPI::BlockVector> solver(solver_control);
+  // SolverBicgstab<TrilinosWrappers::MPI::BlockVector> solver(solver_control);
 
   PreconditionBlockTriangular preconditioner;
   preconditioner.initialize(jacobian_matrix.block(0, 0),
