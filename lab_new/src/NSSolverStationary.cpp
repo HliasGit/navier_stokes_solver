@@ -2,23 +2,86 @@
 
 void NSSolverStationary::setup()
 {
-  // Create the mesh.
+  // Create the mesh 2
   {
-    pcout << "Initializing the mesh" << std::endl;
+    constexpr unsigned int dim = 2;
 
-    // First we read the mesh from file into a serial (i.e. not parallel)
-    // triangulation.
-    Triangulation<dim> mesh_serial;
+    // First: Create a full rectangular mesh with quadrilaterals.
+    Triangulation<dim> full_tria;
+    const Point<dim> bottom_left(0.0, 0.0);
+    const Point<dim> top_right(2.2, 0.41);
+    // Use a subdivision that gives reasonable resolution.
+    // std::vector<unsigned int> subdivisions{300, 100};
+    std::vector<unsigned int> subdivisions{50, 20};
+    GridGenerator::subdivided_hyper_rectangle(full_tria,
+                                                subdivisions,
+                                                bottom_left,
+                                                top_right);
+    // full_tria now holds only quadrilaterals (2d hypercubes).
 
+    // Define the circle (hole) parameters.
+    // We place the circle at the center of the rectangle.
+    const Point<dim> circle_center((bottom_left[0] + 0.2),
+                                  (bottom_left[1] + top_right[1]) / 2.0);
+    const double circle_radius = 0.05; // adjust as needed
+
+    // Prepare vectors to store vertices and cell connectivity.
+    std::vector<Point<dim>> vertices;
+    std::vector<CellData<dim>> cells;
+    SubCellData subcell_data; // empty subcell data
+
+    // Copy vertices from the full triangulation.
+    // The Triangulation object stores vertices with indices 0..n_vertices()-1.
+    vertices.resize(full_tria.n_vertices());
+    for (unsigned int i = 0; i < full_tria.n_vertices(); ++i)
+      vertices[i] = full_tria.get_vertices()[i];
+
+    // Loop over all active cells in the full triangulation.
+    // For each cell not inside the circle, copy its vertex indices.
+    for (auto cell = full_tria.begin_active(); cell != full_tria.end(); ++cell)
     {
-      GridIn<dim> grid_in;
-      grid_in.attach_triangulation(mesh_serial);
-
-      std::ifstream grid_in_file(mesh_file_name);
-      grid_in.read_msh(grid_in_file);
+      // Skip the cell if its center lies inside the circle.
+      if ((cell->center() - circle_center).norm() < circle_radius)
+        continue;
+      
+      // Create a CellData object.
+      CellData<dim> cell_data;
+      cell_data.vertices.resize(GeometryInfo<dim>::vertices_per_cell);
+      for (unsigned int v = 0; v < GeometryInfo<dim>::vertices_per_cell; ++v)
+        cell_data.vertices[v] = cell->vertex_index(v);
+      cell_data.material_id = 0; // default material id (unused here)
+      cells.push_back(cell_data);
     }
 
-    // Then, we copy the triangulation into the parallel one.
+    // Remove vertices that are not used in any cell.
+    GridTools::delete_unused_vertices(vertices, cells, subcell_data);
+
+    // Create a new triangulation using the filtered vertices and cells.
+    Triangulation<dim> mesh_serial;
+    mesh_serial.create_triangulation(vertices, cells, subcell_data);
+
+    // Mark boundaries.
+    // Loop over all active cells and then over each face.
+    // - Left side (x = bottom_left[0]) -> boundary id 7 (inlet)
+    // - Right side (x = top_right[0]) -> boundary id 8 (outlet)
+    // - All other boundaries -> boundary id 6.
+    for (auto cell = mesh_serial.begin_active(); cell != mesh_serial.end(); ++cell)
+    {
+      for (unsigned int face = 0; face < GeometryInfo<dim>::faces_per_cell; ++face)
+      {
+        if (cell->face(face)->at_boundary())
+        {
+          const Point<dim> face_center = cell->face(face)->center();
+          if (std::fabs(face_center[0] - bottom_left[0]) < 1e-12)
+            cell->face(face)->set_boundary_id(7); // inlet
+          else if (std::fabs(face_center[0] - top_right[0]) < 1e-12)
+            cell->face(face)->set_boundary_id(8); // outlet
+          else
+            cell->face(face)->set_boundary_id(6); // all other boundaries (top, bottom, circular)
+        }
+      }
+    }
+
     {
       GridTools::partition_triangulation(mpi_size, mesh_serial);
       const auto construction_data = TriangulationDescription::Utilities::
@@ -30,16 +93,51 @@ void NSSolverStationary::setup()
     // processes).
     pcout << "  Number of elements = " << mesh.n_global_active_cells()
           << std::endl;
-  }
 
-  pcout << "-----------------------------------------------" << std::endl;
+    // Output the mesh to a VTU file.
+    GridOut grid_out;
+    std::ofstream output_file("mesh.msh");
+    grid_out.write_msh(mesh, output_file);
+    std::cout << "Mesh written to mesh.msh" << std::endl;
+  }
+  // Create the mesh.
+  // {
+  //   pcout << "Initializing the mesh" << std::endl;
+
+  //   // First we read the mesh from file into a serial (i.e. not parallel)
+  //   // triangulation.
+  //   Triangulation<dim> mesh_serial;
+
+  //   {
+  //     GridIn<dim> grid_in;
+  //     grid_in.attach_triangulation(mesh_serial);
+
+  //     std::ifstream grid_in_file(mesh_file_name);
+  //     grid_in.read_msh(grid_in_file);
+  //   }
+
+  //   // Then, we copy the triangulation into the parallel one.
+  //   {
+  //     GridTools::partition_triangulation(mpi_size, mesh_serial);
+  //     const auto construction_data = TriangulationDescription::Utilities::
+  //         create_description_from_triangulation(mesh_serial, MPI_COMM_WORLD);
+  //     mesh.create_triangulation(construction_data);
+  //   }
+
+  //   // Notice that we write here the number of *global* active cells (across all
+  //   // processes).
+  //   pcout << "  Number of elements = " << mesh.n_global_active_cells()
+  //         << std::endl;
+  // }
+
+  // pcout << "-----------------------------------------------" << std::endl;
 
   // Initialize the finite element space. This is the same as in serial codes.
   {
     pcout << "Initializing the finite element space" << std::endl;
 
-    const FE_SimplexP<dim> fe_scalar_velocity(degree_velocity);
-    const FE_SimplexP<dim> fe_scalar_pressure(degree_pressure);
+    const FE_Q<dim> fe_scalar_velocity(degree_velocity);
+    const FE_Q<dim> fe_scalar_pressure(degree_pressure);
 
     fe = std::make_unique<FESystem<dim>>(fe_scalar_velocity,
                                          dim,
@@ -53,12 +151,12 @@ void NSSolverStationary::setup()
     pcout << "  DoFs per cell              = " << fe->dofs_per_cell
           << std::endl;
 
-    quadrature = std::make_unique<QGaussSimplex<dim>>(fe->degree + 1);
+    quadrature = std::make_unique<QGauss<dim>>(fe->degree + 1);
 
     pcout << "  Quadrature points per cell = " << quadrature->size()
           << std::endl;
 
-    quadrature_face = std::make_unique<QGaussSimplex<dim - 1>>(fe->degree + 1);
+    quadrature_face = std::make_unique<QGauss<dim - 1>>(fe->degree + 1);
 
     pcout << "  Quadrature points per face = " << quadrature_face->size()
           << std::endl;
@@ -71,6 +169,7 @@ void NSSolverStationary::setup()
     pcout << "Initializing the DoF handler" << std::endl;
 
     dof_handler.reinit(mesh);
+
     dof_handler.distribute_dofs(*fe);
 
     // We want to reorder DoFs so that all velocity DoFs come first, and then
@@ -463,9 +562,10 @@ void NSSolverStationary::assemble_system(bool first_iter)
 
 int NSSolverStationary::solve_system()
 {
-  SolverControl solver_control(20000, 1e-12);
+  SolverControl solver_control(20000, 1e-6);
 
   SolverFGMRES<TrilinosWrappers::MPI::BlockVector> solver(solver_control);
+  // SolverBicgstab<TrilinosWrappers::MPI::BlockVector> solver(solver_control);
 
   PreconditionBlockTriangular preconditioner;
   preconditioner.initialize(jacobian_matrix.block(0, 0),
