@@ -11,8 +11,8 @@ void NSSolverStationary::setup()
     const Point<dim> bottom_left(0.0, 0.0);
     const Point<dim> top_right(2.2, 0.41);
     // Use a subdivision that gives reasonable resolution.
-    // std::vector<unsigned int> subdivisions{300, 100};
-    std::vector<unsigned int> subdivisions{50, 20};
+    std::vector<unsigned int> subdivisions{300, 100};
+    // std::vector<unsigned int> subdivisions{50, 20};
     GridGenerator::subdivided_hyper_rectangle(full_tria,
                                                 subdivisions,
                                                 bottom_left,
@@ -589,7 +589,7 @@ void NSSolverStationary::solve_newton()
 
   const unsigned int n_max_iters = 10;
   const double residual_tolerance = 1e-9;
-  double target_Re = 10.0;
+  double target_Re = 100.0;
   bool first_iter = true;
   bool inlet_reached = false;
   pcout << "Target Re = " << target_Re << std::endl;
