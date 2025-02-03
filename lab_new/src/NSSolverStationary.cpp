@@ -560,30 +560,26 @@ void NSSolverStationary::assemble_system(bool first_iter)
   }
 }
 
-int NSSolverStationary::solve_system()
-{
-  SolverControl solver_control(20000, 1e-6);
-
+int NSSolverStationary::solve_system() {
+  SolverControl solver_control(20000, 1e-12);
   SolverFGMRES<TrilinosWrappers::MPI::BlockVector> solver(solver_control);
-  // SolverBicgstab<TrilinosWrappers::MPI::BlockVector> solver(solver_control);
 
-  PreconditionBlockTriangular preconditioner;
-  preconditioner.initialize(jacobian_matrix.block(0, 0),
-                            pressure_mass.block(1, 1),
-                            jacobian_matrix.block(1, 0));
+  PreconditionaSIMPLE preconditioner;
+  preconditioner.initialize(
+      jacobian_matrix.block(0, 0),   // F (velocity block)
+      jacobian_matrix.block(1, 0),   // B (divergence, not negative)
+      jacobian_matrix.block(0, 1),   // B^T (gradient)
+      solution_owned,                // Vector for D_inv scaling
+      0.8                            // Damping factor α
+  );
 
-  // double alpha = 0.5;
-  // PreconditionaSIMPLE preconditioner_asimple;
-  // preconditioner_asimple.initialize(jacobian_matrix.block(0, 0),
-  //                                   jacobian_matrix.block(1, 0),
-  //                                   jacobian_matrix.block(0, 1),
-  //                                   delta_owned,
-  //                                   alpha);
+  // PreconditionBlockTriangular preconditioner;
+  // preconditioner.initialize(jacobian_matrix.block(0, 0),
+  //                           pressure_mass.block(1, 1),
+  //                           jacobian_matrix.block(1, 0));
 
   solver.solve(jacobian_matrix, delta_owned, residual_vector, preconditioner);
-  pcout << "   " << solver_control.last_step() << " GMRES iterations"
-        << std::endl;
-
+  pcout << "   " << solver_control.last_step() << " GMRES iterations" << std::endl;
   return solver_control.last_step();
 }
 
@@ -673,7 +669,7 @@ void NSSolverStationary::solve_newton()
             output();
             break;
           }
-          //output();
+          output();
           ++n_iter;
         }
 
