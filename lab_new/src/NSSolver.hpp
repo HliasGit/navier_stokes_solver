@@ -24,8 +24,10 @@
 #include <deal.II/grid/grid_refinement.h>
 #include <deal.II/numerics/data_out.h>
 
+#include <deal.II/lac/petsc_solver.h>
 #include <deal.II/lac/solver_cg.h>
 #include <deal.II/lac/solver_gmres.h>
+#include <deal.II/lac/solver_bicgstab.h>
 #include <deal.II/lac/trilinos_block_sparse_matrix.h>
 #include <deal.II/lac/trilinos_parallel_block_vector.h>
 #include <deal.II/lac/trilinos_precondition.h>
@@ -389,8 +391,13 @@ public:
            const unsigned int &degree_velocity_,
            const unsigned int &degree_pressure_,
            const double &T_,
-           const double &delta_t_)
-      : mpi_size(Utilities::MPI::n_mpi_processes(MPI_COMM_WORLD)), mpi_rank(Utilities::MPI::this_mpi_process(MPI_COMM_WORLD)), pcout(std::cout, mpi_rank == 0), mesh_file_name(mesh_file_name_), mesh(MPI_COMM_WORLD), degree_velocity(degree_velocity_), degree_pressure(degree_pressure_), T(T_), delta_t(delta_t_)
+           const double &delta_t_,
+           const unsigned int &mesh_size_x_,
+           const unsigned int &mesh_size_y_,
+           const unsigned int &solver_type_,
+           const double &tolerance_,
+           const unsigned int &preconditioner_type_)
+      : mpi_size(Utilities::MPI::n_mpi_processes(MPI_COMM_WORLD)), mpi_rank(Utilities::MPI::this_mpi_process(MPI_COMM_WORLD)), pcout(std::cout, mpi_rank == 0), mesh_file_name(mesh_file_name_), mesh(MPI_COMM_WORLD), degree_velocity(degree_velocity_), degree_pressure(degree_pressure_), T(T_), delta_t(delta_t_), solver_type(solver_type_), tolerance(tolerance_), preconditioner_type(preconditioner_type_), mesh_size_x(mesh_size_x_), mesh_size_y(mesh_size_y_)
   {
   }
 
@@ -447,15 +454,10 @@ protected:
   // Forcing term
   ForcingTerm forcing_term;
 
-  // Lagrangian
-  // const double gamma = 1.0;
-
   // Discretization. ///////////////////////////////////////////////////////////
 
-  // Mesh file name.
-  const std::string &mesh_file_name;
-
   // Mesh.
+  const std::string &mesh_file_name;
   parallel::fullydistributed::Triangulation<dim> mesh;
 
   // Polynomial degrees.
@@ -465,11 +467,16 @@ protected:
   // current time
   double time;
 
+  // Solver parameters. ////////////////////////////////////////////////////////
   // final time
   double T;
-
   // Time step.
   const double delta_t;
+  const unsigned int solver_type;
+  const double tolerance;
+  const unsigned int preconditioner_type;
+  const unsigned int mesh_size_x;
+  const unsigned int mesh_size_y;
 
   // Finite element space.
   std::unique_ptr<FESystem<dim>> fe;

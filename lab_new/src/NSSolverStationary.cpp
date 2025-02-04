@@ -12,7 +12,7 @@ void NSSolverStationary::setup()
     const Point<dim> top_right(2.2, 0.41);
 
     // Use a subdivision that gives reasonable resolution.
-    std::vector<unsigned int> subdivisions{300, 100};
+    std::vector<unsigned int> subdivisions{mesh_size_x, mesh_size_y};
     // std::vector<unsigned int> subdivisions{50, 20};
 
     GridGenerator::subdivided_hyper_rectangle(full_tria,
@@ -497,15 +497,80 @@ void NSSolverStationary::assemble_system(bool first_iter)
 }
 
 int NSSolverStationary::solve_system() {
-  SolverControl solver_control(20000, 1e-12);
-  SolverFGMRES<TrilinosWrappers::MPI::BlockVector> solver(solver_control);
+  SolverControl solver_control(20000, tolerance);
+  // Choose the correct preconditioner
+  if (preconditioner_type == 0) {
+      PreconditionBlockDiagonal preconditioner;
+      preconditioner.initialize(jacobian_matrix.block(0, 0),
+                                    pressure_mass.block(1, 1));
 
-  PreconditionBlockTriangular preconditioner;
-  preconditioner.initialize(jacobian_matrix.block(0, 0),
-                            pressure_mass.block(1, 1),
-                            jacobian_matrix.block(1, 0));
+      if (solver_type == 0) {
+          SolverGMRES<TrilinosWrappers::MPI::BlockVector> solver(solver_control);
+          solver.solve(jacobian_matrix, delta_owned, residual_vector, preconditioner);
+      }
+      else if (solver_type == 1) {
+          SolverFGMRES<TrilinosWrappers::MPI::BlockVector> solver(solver_control);
+          solver.solve(jacobian_matrix, delta_owned, residual_vector, preconditioner);
+      }
+      else if (solver_type == 2) {
+          SolverBicgstab<TrilinosWrappers::MPI::BlockVector> solver(solver_control);
+          solver.solve(jacobian_matrix, delta_owned, residual_vector, preconditioner);
+      }
+  }
+  else if (preconditioner_type == 1) {
+      PreconditionBlockTriangular preconditioner;
+      preconditioner.initialize(jacobian_matrix.block(0, 0),
+                                    pressure_mass.block(1, 1),
+                                    jacobian_matrix.block(1, 0));
 
-  solver.solve(jacobian_matrix, delta_owned, residual_vector, preconditioner);
+      if (solver_type == 0) {
+          pcout << "Here" << std::endl;
+          SolverGMRES<TrilinosWrappers::MPI::BlockVector> solver(solver_control);
+          solver.solve(jacobian_matrix, delta_owned, residual_vector, preconditioner);
+      }
+      else if (solver_type == 1) {
+          SolverFGMRES<TrilinosWrappers::MPI::BlockVector> solver(solver_control);
+          solver.solve(jacobian_matrix, delta_owned, residual_vector, preconditioner);
+      }
+      else if (solver_type == 2) {
+          SolverBicgstab<TrilinosWrappers::MPI::BlockVector> solver(solver_control);
+          solver.solve(jacobian_matrix, delta_owned, residual_vector, preconditioner);
+      }
+  }
+  else if (preconditioner_type == 2) {
+      double alpha = 0.5;
+      PreconditionaSIMPLE preconditioner;
+      preconditioner.initialize(jacobian_matrix.block(0, 0),
+                                    jacobian_matrix.block(1, 0),
+                                    jacobian_matrix.block(0, 1),
+                                    solution_owned,
+                                    alpha);
+
+      if (solver_type == 0) {
+          SolverGMRES<TrilinosWrappers::MPI::BlockVector> solver(solver_control);
+          solver.solve(jacobian_matrix, delta_owned, residual_vector, preconditioner);
+      }
+      else if (solver_type == 1) {
+          SolverFGMRES<TrilinosWrappers::MPI::BlockVector> solver(solver_control);
+          solver.solve(jacobian_matrix, delta_owned, residual_vector, preconditioner);
+      }
+      else if (solver_type == 2) {
+          SolverBicgstab<TrilinosWrappers::MPI::BlockVector> solver(solver_control);
+          solver.solve(jacobian_matrix, delta_owned, residual_vector, preconditioner);
+      }
+  }
+  else {
+      throw std::invalid_argument("Invalid preconditioner type. Use 0: blockDiagonal, 1: blockTriangular, 2: aSIMPLE.");
+  }
+    
+  // SolverFGMRES<TrilinosWrappers::MPI::BlockVector> solver(solver_control);
+
+  // PreconditionBlockTriangular preconditioner;
+  // preconditioner.initialize(jacobian_matrix.block(0, 0),
+  //                           pressure_mass.block(1, 1),
+  //                           jacobian_matrix.block(1, 0));
+
+  // solver.solve(jacobian_matrix, delta_owned, residual_vector, preconditioner);
   pcout << "   " << solver_control.last_step() << " GMRES iterations" << std::endl;
   return solver_control.last_step();
 }

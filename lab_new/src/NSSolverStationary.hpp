@@ -338,8 +338,13 @@ public:
   // Constructor.
   NSSolverStationary(const std::string &mesh_file_name_,
                      const unsigned int &degree_velocity_,
-                     const unsigned int &degree_pressure_)
-      : mpi_size(Utilities::MPI::n_mpi_processes(MPI_COMM_WORLD)), mpi_rank(Utilities::MPI::this_mpi_process(MPI_COMM_WORLD)), pcout(std::cout, mpi_rank == 0), mesh_file_name(mesh_file_name_), mesh(MPI_COMM_WORLD), degree_velocity(degree_velocity_), degree_pressure(degree_pressure_)
+                     const unsigned int &degree_pressure_,
+                     const unsigned int &mesh_size_x_,
+                     const unsigned int &mesh_size_y_,
+                     const unsigned int &solver_type_,
+                     const double &tolerance_,
+                     const unsigned int &preconditioner_type_)
+      : mpi_size(Utilities::MPI::n_mpi_processes(MPI_COMM_WORLD)), mpi_rank(Utilities::MPI::this_mpi_process(MPI_COMM_WORLD)), pcout(std::cout, mpi_rank == 0), mesh_file_name(mesh_file_name_), mesh(MPI_COMM_WORLD), degree_velocity(degree_velocity_), degree_pressure(degree_pressure_), solver_type(solver_type_), tolerance(tolerance_), preconditioner_type(preconditioner_type_), mesh_size_x(mesh_size_x_), mesh_size_y(mesh_size_y_)
   {
   }
 
@@ -391,19 +396,21 @@ protected:
   // Pressure out [Pa]
   const double p_out = 1.0;
 
-  // Lagrangian
-  // const double gamma = 1.0;
   // Discretization. ///////////////////////////////////////////////////////////
 
   // Mesh file name.
   const std::string &mesh_file_name;
-
   // Mesh.
   parallel::fullydistributed::Triangulation<dim> mesh;
 
   // Polynomial degrees.
   const unsigned int degree_velocity;
   const unsigned int degree_pressure;
+  const unsigned int solver_type;
+  const double tolerance;
+  const unsigned int preconditioner_type;
+  const unsigned int mesh_size_x;
+  const unsigned int mesh_size_y;
 
   // Finite element space.
   std::unique_ptr<FESystem<dim>> fe;

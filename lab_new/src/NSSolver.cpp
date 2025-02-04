@@ -2,7 +2,7 @@
 
 void NSSolver::setup()
 {
-  // Create the mesh 2
+  // Create the mesh using GridGenerator.
   {
     constexpr unsigned int dim = 2;
 
@@ -12,7 +12,7 @@ void NSSolver::setup()
     const Point<dim> top_right(2.2, 0.41);
     // Use a subdivision that gives reasonable resolution.
     // std::vector<unsigned int> subdivisions{300, 100};
-    std::vector<unsigned int> subdivisions{50, 20};
+    std::vector<unsigned int> subdivisions{mesh_size_x, mesh_size_y};
     GridGenerator::subdivided_hyper_rectangle(full_tria,
                                                 subdivisions,
                                                 bottom_left,
@@ -23,7 +23,7 @@ void NSSolver::setup()
     // We place the circle at the center of the rectangle.
     const Point<dim> circle_center((bottom_left[0] + 0.2),
                                   (bottom_left[1] + top_right[1]) / 2.0);
-    const double circle_radius = 0.05; // adjust as needed
+    const double circle_radius = 0.05; 
 
     // Prepare vectors to store vertices and cell connectivity.
     std::vector<Point<dim>> vertices;
@@ -98,39 +98,10 @@ void NSSolver::setup()
     GridOut grid_out;
     std::ofstream output_file("mesh.msh");
     grid_out.write_msh(mesh, output_file);
-    std::cout << "Mesh written to mesh.msh" << std::endl;
+    pcout << "Mesh written to mesh.msh" << std::endl;
   }
-  // // Create the mesh.
-  // {
-  //   pcout << "Initializing the mesh" << std::endl;
 
-  //   // First we read the mesh from file into a serial (i.e. not parallel)
-  //   // triangulation.
-  //   Triangulation<dim> mesh_serial;
-
-  //   {
-  //     GridIn<dim> grid_in;
-  //     grid_in.attach_triangulation(mesh_serial);
-
-  //     std::ifstream grid_in_file(mesh_file_name);
-  //     grid_in.read_msh(grid_in_file);
-  //   }
-
-  //   // Then, we copy the triangulation into the parallel one.
-  //   {
-  //     GridTools::partition_triangulation(mpi_size, mesh_serial);
-  //     const auto construction_data = TriangulationDescription::Utilities::
-  //         create_description_from_triangulation(mesh_serial, MPI_COMM_WORLD);
-  //     mesh.create_triangulation(construction_data);
-  //   }
-
-  //   // Notice that we write here the number of *global* active cells (across all
-  //   // processes).
-  //   pcout << "  Number of elements = " << mesh.n_global_active_cells()
-  //         << std::endl;
-  // }
-
-  // pcout << "-----------------------------------------------" << std::endl;
+  pcout << "-----------------------------------------------" << std::endl;
 
   // Initialize the finite element space. This is the same as in serial codes.
   {
@@ -555,27 +526,84 @@ void NSSolver::assemble_system(bool first_iter)
 
 int NSSolver::solve_system()
 {
-  SolverControl solver_control(100000, 1e-6);
+    pcout << "Solver tolerance: " << tolerance << std::endl;
+    SolverControl solver_control(100000, tolerance);
 
-  SolverGMRES<TrilinosWrappers::MPI::BlockVector> solver(solver_control);
+    // Choose the correct preconditioner
+    if (preconditioner_type == 0) {
+        PreconditionBlockDiagonal preconditioner;
+        preconditioner.initialize(jacobian_matrix.block(0, 0),
+                                      pressure_mass.block(1, 1));
 
-  PreconditionBlockTriangular preconditioner;
-  preconditioner.initialize(jacobian_matrix.block(0, 0),
-                            pressure_mass.block(1, 1),
-                            jacobian_matrix.block(1, 0));
+        if (solver_type == 0) {
+            SolverGMRES<TrilinosWrappers::MPI::BlockVector> solver(solver_control);
+            solver.solve(jacobian_matrix, delta_owned, residual_vector, preconditioner);
+        }
+        else if (solver_type == 1) {
+            SolverFGMRES<TrilinosWrappers::MPI::BlockVector> solver(solver_control);
+            solver.solve(jacobian_matrix, delta_owned, residual_vector, preconditioner);
+        }
+        else if (solver_type == 2) {
+            SolverBicgstab<TrilinosWrappers::MPI::BlockVector> solver(solver_control);
+            solver.solve(jacobian_matrix, delta_owned, residual_vector, preconditioner);
+        }
+    }
+    else if (preconditioner_type == 1) {
+        PreconditionBlockTriangular preconditioner;
+        preconditioner.initialize(jacobian_matrix.block(0, 0),
+                                      pressure_mass.block(1, 1),
+                                      jacobian_matrix.block(1, 0));
 
-  // double alpha = 0.5;
-  // PreconditionaSIMPLE preconditioner_asimple;
-  // preconditioner_asimple.initialize(jacobian_matrix.block(0, 0),
-  //                                   jacobian_matrix.block(1, 0),
-  //                                   jacobian_matrix.block(0, 1),
-  //                                   solution_owned,
-  //                                   alpha);
+        if (solver_type == 0) {
+            SolverGMRES<TrilinosWrappers::MPI::BlockVector> solver(solver_control);
+            solver.solve(jacobian_matrix, delta_owned, residual_vector, preconditioner);
+        }
+        else if (solver_type == 1) {
+            SolverFGMRES<TrilinosWrappers::MPI::BlockVector> solver(solver_control);
+            solver.solve(jacobian_matrix, delta_owned, residual_vector, preconditioner);
+        }
+        else if (solver_type == 2) {
+            SolverBicgstab<TrilinosWrappers::MPI::BlockVector> solver(solver_control);
+            solver.solve(jacobian_matrix, delta_owned, residual_vector, preconditioner);
+        }
+    }
+    else if (preconditioner_type == 2) {
+        double alpha = 0.5;
+        PreconditionaSIMPLE preconditioner;
+        preconditioner.initialize(jacobian_matrix.block(0, 0),
+                                      jacobian_matrix.block(1, 0),
+                                      jacobian_matrix.block(0, 1),
+                                      solution_owned,
+                                      alpha);
 
-  solver.solve(jacobian_matrix, delta_owned, residual_vector, preconditioner);
-  pcout << "   " << solver_control.last_step() << " GMRES iterations"
-        << std::endl;
-  return solver_control.last_step();
+        if (solver_type == 0) {
+            SolverGMRES<TrilinosWrappers::MPI::BlockVector> solver(solver_control);
+            solver.solve(jacobian_matrix, delta_owned, residual_vector, preconditioner);
+        }
+        else if (solver_type == 1) {
+            SolverFGMRES<TrilinosWrappers::MPI::BlockVector> solver(solver_control);
+            solver.solve(jacobian_matrix, delta_owned, residual_vector, preconditioner);
+        }
+        else if (solver_type == 2) {
+            SolverBicgstab<TrilinosWrappers::MPI::BlockVector> solver(solver_control);
+            solver.solve(jacobian_matrix, delta_owned, residual_vector, preconditioner);
+        }
+    }
+    else {
+        throw std::invalid_argument("Invalid preconditioner type. Use 0: blockDiagonal, 1: blockTriangular, 2: aSIMPLE.");
+    }
+
+    // SolverGMRES<TrilinosWrappers::MPI::BlockVector> solver(solver_control);
+
+    // PreconditionBlockTriangular preconditioner;
+    // preconditioner.initialize(jacobian_matrix.block(0, 0),
+    //                           pressure_mass.block(1, 1),
+    //                           jacobian_matrix.block(1, 0));
+
+    // solver.solve(jacobian_matrix, delta_owned, residual_vector, preconditioner);
+
+    pcout << "   " << solver_control.last_step() << " iterations" << std::endl;
+    return solver_control.last_step();
 }
 
 void NSSolver::solve_newton()
@@ -587,7 +615,7 @@ void NSSolver::solve_newton()
   double target_Re = 1.0 / nu;
   bool first_iter = true;
 
-  for (double Re = 1.0; Re <= target_Re; Re += 240)
+  for (double Re = 1.0; Re <= target_Re; Re += 10.0)
   {
     pcout << "===============================================" << std::endl;
     nu = 1.0 / Re;
@@ -710,11 +738,6 @@ void NSSolver::solve()
 
   // Apply the initial condition.
   {
-    pcout << "Applying the initial condition" << std::endl;
-
-    // VectorTools::interpolate(dof_handler, u_0, solution_owned);
-    // solution = solution_owned;
-
     // Output the initial solution.
     output(0);
     pcout << "-----------------------------------------------" << std::endl;
@@ -780,7 +803,6 @@ void NSSolver::compute_lift_drag()
   Tensor<2, dim> viscous_stress;
   Tensor<1, dim> force;
 
-  pcout << "Debug " << std::endl;
 
   for (const auto &cell : dof_handler.active_cell_iterators())
   {
@@ -792,6 +814,7 @@ void NSSolver::compute_lift_drag()
       if (cell->face(f)->at_boundary() &&
           cell->face(f)->boundary_id() == 10)
       {
+        pcout << "Debug " << std::endl;
         fe_face_values.reinit(cell, f);
 
         fe_face_values[velocity].get_function_values(solution, velocity_loc);
