@@ -524,7 +524,6 @@ int NSSolverStationary::solve_system() {
                                     jacobian_matrix.block(1, 0));
 
       if (solver_type == 0) {
-          pcout << "Here" << std::endl;
           SolverGMRES<TrilinosWrappers::MPI::BlockVector> solver(solver_control);
           solver.solve(jacobian_matrix, delta_owned, residual_vector, preconditioner);
       }
