@@ -234,7 +234,7 @@ void NSSolverStationary::setup()
   }
 }
 
-void NSSolverStationary::assemble_system(bool first_iter)
+void NSSolverStationary::assemble_system(bool global_first_iter, bool computing_stokes)
 {
   const unsigned int dofs_per_cell = fe->dofs_per_cell;
   const unsigned int n_q = quadrature->size();
@@ -300,7 +300,7 @@ void NSSolverStationary::assemble_system(bool first_iter)
       {
         for (unsigned int j = 0; j < dofs_per_cell; ++j)
         {
-          if (first_iter)
+          if (global_first_iter || computing_stokes)
           {
             // Viscosity term.
             cell_matrix(i, j) +=
@@ -372,7 +372,7 @@ void NSSolverStationary::assemble_system(bool first_iter)
           }
         }
 
-        if (first_iter)
+        if (global_first_iter || computing_stokes)
         {
           continue;
         }
@@ -466,7 +466,7 @@ void NSSolverStationary::assemble_system(bool first_iter)
     boundary_values.clear();
 
     // Apply the non-homogeneous Dirichlet BCs to inlet_velocity only in the first step 
-    if (first_iter)
+    if (global_first_iter)
     {
       boundary_functions[7] = &inlet_velocity;
     }
@@ -580,8 +580,9 @@ void NSSolverStationary::solve_newton()
 
   const unsigned int n_max_iters = 10;
   const double residual_tolerance = 1e-9;
-  double target_Re = 100.0;
-  bool first_iter = true;
+  double target_Re = 1000.0;
+  bool global_first_iter = true;
+  bool computing_stokes = true;
   bool inlet_reached = false;
   pcout << "Target Re = " << target_Re << std::endl;
 
@@ -595,24 +596,31 @@ void NSSolverStationary::solve_newton()
 
       while(!inlet_reached) {
         pcout << "Solving for inlet velocity: " << inlet_velocity.getVelocity() << std::endl;
+        if(global_first_iter)
+          pcout << "Solving Stokes adding BCs" << std::endl;
+        else if(computing_stokes)
+          pcout << "Solving Stokes without adding BCs" << std::endl;
+        else
+          pcout << "Solving NS" << std::endl;
+        
         unsigned int n_iter = 0;
         double residual_norm = residual_tolerance + 1;
         double prev_residual;
         int GMRES_iter = 0;
 
-        // Again a first iter
-        // first_iter = true;
-
         while (n_iter < n_max_iters && residual_norm > residual_tolerance)
         {
-          if (first_iter)
+          if (global_first_iter)
           {
-            first_iter = false;
-            assemble_system(n_iter == 0 ? true : false);
+            global_first_iter = false;
+            assemble_system(true, true);
           }
           else
           {
-            assemble_system(false);
+            if(computing_stokes)
+              assemble_system(false, true);
+            else
+              assemble_system(false, false);
           }
 
           residual_norm = residual_vector.l2_norm();
@@ -641,7 +649,11 @@ void NSSolverStationary::solve_newton()
               solution_owned.add(alpha, delta_owned);
               solution = solution_owned;
 
-              assemble_system(false);
+              if(computing_stokes)
+                assemble_system(false, true);
+              else
+                assemble_system(false, false);
+
               residual_norm = residual_vector.l2_norm();
 
               pcout << "  Evaluating alpha=" << alpha << ", ||r||=" << residual_norm << std::endl;
@@ -665,6 +677,8 @@ void NSSolverStationary::solve_newton()
 
         // Increment inlet velocity
         inlet_reached = inlet_velocity.incrementVelocity(get_reynolds());
+        if(inlet_reached)
+          computing_stokes = false;
       }
       output();
   }

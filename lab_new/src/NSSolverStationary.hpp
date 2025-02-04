@@ -366,7 +366,7 @@ public:
 protected:
   // Assemble the tangent problem.
   void
-  assemble_system(bool first_iter);
+  assemble_system(bool first_iter, bool computing_stokes);
 
   // Solve the tangent problem.
   int
