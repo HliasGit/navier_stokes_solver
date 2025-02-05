@@ -129,10 +129,7 @@ int main(int argc, char *argv[]) {
       std::cout << "-----------------------------------------------\n";
     }
     
-    // NSSolver problem(degree_velocity, degree_pressure, time_span, time_step, mesh_size_x, mesh_size_y, solver_type, tolerance, preconditioner);
     const std::string  mesh_file_name  = "../mesh/2dMeshCylinder.msh";
-    // const unsigned int degree_velocity = 3;
-    // const unsigned int degree_pressure = 2;
 
     NSSolver problem(mesh_file_name, degree_velocity, degree_pressure, time_span, time_step, mesh_size_x, mesh_size_y, solver_type, tolerance, preconditioner);
 

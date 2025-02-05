@@ -11,6 +11,7 @@
 #include <deal.II/dofs/dof_tools.h>
 
 #include <deal.II/fe/fe_q.h>
+#include <deal.II/fe/fe_simplex_p.h>
 #include <deal.II/fe/fe_system.h>
 #include <deal.II/fe/fe_values.h>
 #include <deal.II/fe/fe_values_extractors.h>
@@ -95,8 +96,7 @@ public:
       if (u == U_m)
         return true;
 
-      //u += 1.0 / re;
-      u += 0.1;
+      u += 0.15;
 
       if (re == 0.0)
         u = 0.01;
@@ -343,8 +343,10 @@ public:
                      const unsigned int &mesh_size_y_,
                      const unsigned int &solver_type_,
                      const double &tolerance_,
-                     const unsigned int &preconditioner_type_)
-      : mpi_size(Utilities::MPI::n_mpi_processes(MPI_COMM_WORLD)), mpi_rank(Utilities::MPI::this_mpi_process(MPI_COMM_WORLD)), pcout(std::cout, mpi_rank == 0), mesh_file_name(mesh_file_name_), mesh(MPI_COMM_WORLD), degree_velocity(degree_velocity_), degree_pressure(degree_pressure_), solver_type(solver_type_), tolerance(tolerance_), preconditioner_type(preconditioner_type_), mesh_size_x(mesh_size_x_), mesh_size_y(mesh_size_y_)
+                     const unsigned int &preconditioner_type_,
+                     double Re_,
+                     bool read_mesh_from_file_)
+      : mpi_size(Utilities::MPI::n_mpi_processes(MPI_COMM_WORLD)), mpi_rank(Utilities::MPI::this_mpi_process(MPI_COMM_WORLD)), pcout(std::cout, mpi_rank == 0), mesh_file_name(mesh_file_name_), mesh(MPI_COMM_WORLD), degree_velocity(degree_velocity_), degree_pressure(degree_pressure_), solver_type(solver_type_), tolerance(tolerance_), preconditioner_type(preconditioner_type_), mesh_size_x(mesh_size_x_), mesh_size_y(mesh_size_y_), Re(Re_), read_mesh_from_file(read_mesh_from_file_)
   {
   }
 
@@ -388,7 +390,7 @@ protected:
   // Problem definition. ///////////////////////////////////////////////////////
 
   // Kinematic viscosity [m2/s]
-  double nu = 0.001;
+  double nu = 0.001;  
 
   // Inlet velocity
   InletVelocity inlet_velocity;
@@ -411,9 +413,12 @@ protected:
   const unsigned int preconditioner_type;
   const unsigned int mesh_size_x;
   const unsigned int mesh_size_y;
+  double Re;
+  bool read_mesh_from_file;
 
   // Finite element space.
   std::unique_ptr<FESystem<dim>> fe;
+  // std::unique_ptr<FiniteElement<dim>> fe;
 
   // Quadrature formula.
   std::unique_ptr<Quadrature<dim>> quadrature;

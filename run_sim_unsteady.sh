@@ -1,14 +1,15 @@
 #!/bin/sh -l
-#SBATCH --ntasks-per-node 16
+#SBATCH --ntasks-per-node 48
 #SBATCH -N 1
 #SBATCH -t 1:00:00
 #SBATCH --export=ALL
+#SBATCH -p bigmem
 #SBATCH --mem=32GB
 #SBATCH -J NSSimulation
-#SBATCH -o results_sim_steady/sim%j.out
+#SBATCH -o results_sim_unsteady/sim%j.out
 
 # Export variables so they're accessible inside the singularity container
-export MPI_PROCS=16
+export MPI_PROCS=48
 export MESH_DIMS="60,40"
 export PERF_LOG="/home/users/gdaneri/navier_stokes_solver/performance_log.csv"
 
@@ -19,8 +20,7 @@ singularity -s exec /home/users/gdaneri/mk_latest.sif /bin/bash -c '
    
    start_time=$(date +%s.%N)
    
-   mpiexec -n $MPI_PROCS /home/users/gdaneri/navier_stokes_solver/lab_new/build/NSSolver -m $MESH_DIMS -T 1.0,0.01 -t 0.000000000001 -p 1 -s 0
-   
+   mpiexec -n $MPI_PROCS /home/users/gdaneri/navier_stokes_solver/lab_new/build/NSSolver -t 0.00000000001 -m $MESH_DIMS -s 0 -p 1
    end_time=$(date +%s.%N)
    duration=$(awk "BEGIN {print $end_time - $start_time}")
    
@@ -33,3 +33,4 @@ singularity -s exec /home/users/gdaneri/mk_latest.sif /bin/bash -c '
    
    echo "$duration,$MPI_PROCS,$dim_x,$dim_y" >> $PERF_LOG
 '
+#    mpiexec -n $MPI_PROCS /home/users/gdaneri/navier_stokes_solver/lab_new/build/NSSolver -m $MESH_DIMS -t 0.000000000001 -p 1 -s 0

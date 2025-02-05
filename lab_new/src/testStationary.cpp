@@ -7,7 +7,9 @@
 void print_help() {
     std::cout << "Usage: ./NSSolver [options]\n\n"
               << "Options:\n"
+              << "  -M, --read-mesh-from-file  Read mesh from file instead or generate it inside the program\n"
               << "  -m, --mesh-size X,Y       Set mesh size (two integers separated by a comma)\n"
+              << "  -r, --reynolds N         Set Reynolds number (floating point value)\n"
               << "  -s, --solver N            Select solver (valid values: 0: GMRES, 1: FGMRES, 2: Bicgstab)\n"
               << "  -t, --tolerance D         Set tolerance (floating point value)\n"
               << "  -p, --preconditioner N    Select preconditioner (valid values: 0: blockDiagonal, 1: blockTriangular, 2: aSIMPLE)\n"
@@ -19,8 +21,10 @@ int main(int argc, char *argv[]) {
     Utilities::MPI::MPI_InitFinalize mpi_init(argc, argv);
 
     // Default parameters
+    bool read_mesh_from_file = false;
     unsigned int degree_velocity = 3;
     unsigned int degree_pressure = 2;
+    double Re = 100.0;
     int mesh_size_x = 100, mesh_size_y = 100;
     int solver_type = 1;
     double tolerance = 1e-6;
@@ -28,7 +32,9 @@ int main(int argc, char *argv[]) {
 
     // Define long options
     static struct option long_options[] = {
+        {"read-mesh-from-file", no_argument, 0, 'M'},
         {"mesh-size", required_argument, 0, 'm'},
+        {"reynolds", required_argument, 0, 'r'},
         {"solver", required_argument, 0, 's'},
         {"tolerance", required_argument, 0, 't'},
         {"preconditioner", required_argument, 0, 'p'},
@@ -38,8 +44,13 @@ int main(int argc, char *argv[]) {
 
     int opt;
     // Modified getopt_long string to match the new format
-    while ((opt = getopt_long(argc, argv, "T:m:s:t:p:h", long_options, nullptr)) != -1) {
+    while ((opt = getopt_long(argc, argv, "M:m:r:s:t:p:h", long_options, NULL)) != -1) {
         switch (opt) {
+            case 'M':
+                read_mesh_from_file = true;
+                degree_velocity = 2;
+                degree_pressure = 1;
+                break;
             case 'm': {
                 char* comma = strchr(optarg, ',');
                 if (comma) {
@@ -53,6 +64,9 @@ int main(int argc, char *argv[]) {
                 }
                 break;
             }
+            case 'r':
+                Re = std::atof(optarg);
+                break;
             case 's':
                 solver_type = std::atoi(optarg);
                 break;
@@ -86,6 +100,7 @@ int main(int argc, char *argv[]) {
     {
         std::cout << "--------- CONFIGURATION PARAMETERS --------- \n";
         std::cout << "Mesh size: " << mesh_size_x << "x" << mesh_size_y << "\n";
+        std::cout << "Reynolds number: " << Re << "\n";
         std::cout << "Solver type: ";
         if (solver_type == 0) {
         std::cout << "GMRES\n";
@@ -111,9 +126,9 @@ int main(int argc, char *argv[]) {
     }
   
     // Mesh file name.
-    const std::string mesh_file_name = "../mesh/2dMeshFine.msh";
+    const std::string mesh_file_name = "/home/users/gdaneri/navier_stokes_solver/lab_new/mesh/new_mesh.msh";
     
-    NSSolverStationary problem(mesh_file_name, degree_velocity, degree_pressure, mesh_size_x, mesh_size_y, solver_type, tolerance, preconditioner);
+    NSSolverStationary problem(mesh_file_name, degree_velocity, degree_pressure, mesh_size_x, mesh_size_y, solver_type, tolerance, preconditioner, Re, read_mesh_from_file);
 
     problem.setup();
     problem.solve_newton();

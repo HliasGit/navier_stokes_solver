@@ -1,4 +1,5 @@
 */build
 */.json
 .vscode
-
+/results_sim*
+/output*
