@@ -351,6 +351,8 @@ public:
   }
 
   // Initialization.
+  
+  // read the mesh from file or generate it, then set up the problem
   void
   setup();
 
@@ -358,12 +360,9 @@ public:
   void
   solve_newton();
 
-  // Output.
+  // Output the results to a file.
   void
   output() const;
-
-  bool 
-  decreaseViscosity();
 
 protected:
   // Assemble the tangent problem.
@@ -381,7 +380,7 @@ protected:
   // Number of MPI processes.
   const unsigned int mpi_size;
 
-  // This MPI process.
+  // The current MPI process.
   const unsigned int mpi_rank;
 
   // Parallel output stream.
@@ -402,6 +401,7 @@ protected:
 
   // Mesh file name.
   const std::string &mesh_file_name;
+
   // Mesh.
   parallel::fullydistributed::Triangulation<dim> mesh;
 
@@ -418,7 +418,6 @@ protected:
 
   // Finite element space.
   std::unique_ptr<FESystem<dim>> fe;
-  // std::unique_ptr<FiniteElement<dim>> fe;
 
   // Quadrature formula.
   std::unique_ptr<Quadrature<dim>> quadrature;

@@ -53,7 +53,6 @@ void NSSolverStationary::setup()
         if((cell->center() - circle_center).norm() < circle_radius + cell->diameter()/2 &&
             (cell->center() - circle_center).norm() > circle_radius - cell->diameter()/2)
         {
-          pcout << "Cell center: " << cell->center() << std::endl;
           cell_data.material_id = 10;
         }
         else
@@ -651,7 +650,7 @@ void NSSolverStationary::solve_newton()
 {
   pcout << "===============================================" << std::endl;
 
-  const unsigned int n_max_iters = 10;
+  const unsigned int n_max_iters = 15;
   const double residual_tolerance = 1e-9;
   double target_Re = Re;
   bool global_first_iter = true;
@@ -660,7 +659,7 @@ void NSSolverStationary::solve_newton()
   pcout << "Target Re = " << target_Re << std::endl;
 
   // First solve the Stokes problem, then becomes a NS with an ingreasingly more dominant convective term.
-  for (double current_Re = 10.0; current_Re <= target_Re; current_Re += 10.0)
+  for (double current_Re = 10.0; current_Re <= target_Re; current_Re += 20.0)
   {
     pcout << "===============================================" << std::endl;
     nu = 1.0 / current_Re;

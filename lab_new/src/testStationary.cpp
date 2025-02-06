@@ -3,7 +3,7 @@
 #include <iostream>
 #include <cstdlib>
 
-// Function to print help message
+// Print help message
 void print_help() {
     std::cout << "Usage: ./NSSolver [options]\n\n"
               << "Options:\n"
@@ -16,7 +16,6 @@ void print_help() {
               << "  -h, --help                Display this help message\n";
 }
 
-// Main function.
 int main(int argc, char *argv[]) {
     Utilities::MPI::MPI_InitFinalize mpi_init(argc, argv);
 
@@ -43,7 +42,7 @@ int main(int argc, char *argv[]) {
     };
 
     int opt;
-    // Modified getopt_long string to match the new format
+    // Modified getopt_long string to match the required format
     while ((opt = getopt_long(argc, argv, "M:m:r:s:t:p:h", long_options, NULL)) != -1) {
         switch (opt) {
             case 'M':
@@ -87,7 +86,7 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    // Add validation for parameters
+    // Tolerance validation 
     if (tolerance <= 0) {
         if(Utilities::MPI::this_mpi_process(MPI_COMM_WORLD) == 0)
             std::cerr << "Error: tolerance must be positive\n";
@@ -95,7 +94,6 @@ int main(int argc, char *argv[]) {
     }
 
     // Print the parsed values
-    // only the first MPI rank prints the values
     if(Utilities::MPI::this_mpi_process(MPI_COMM_WORLD) == 0)
     {
         std::cout << "--------- CONFIGURATION PARAMETERS --------- \n";
@@ -125,7 +123,7 @@ int main(int argc, char *argv[]) {
         std::cout << "-----------------------------------------------\n";
     }
   
-    // Mesh file name.
+    // Mesh file name
     const std::string mesh_file_name = "/home/users/gdaneri/navier_stokes_solver/lab_new/mesh/new_mesh.msh";
     
     NSSolverStationary problem(mesh_file_name, degree_velocity, degree_pressure, mesh_size_x, mesh_size_y, solver_type, tolerance, preconditioner, Re, read_mesh_from_file);

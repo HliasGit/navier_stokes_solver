@@ -63,6 +63,9 @@ mpirun -n <number_of_processes> ./StationaryNSSolver [options]
 - `-p, --preconditioner N`: Select preconditioner (0: blockDiagonal, 1: blockTriangular, 2: aSIMPLE).
 - `-h, --help`: Display help message.
 
+Only for the unsteady version:
+- `-T, --time-span and time-step T,D`: Set time span and time step (two floating point values separated by a comma).
+
 ## Example
 
 ```sh
